@@ -1,17 +1,25 @@
-# MeChat — Product Requirements (v0.1)
+# MeChat — Production Product Requirements
 
-## Vision
-Responsive AI chat for everyday use, research, development and learning.
+## Positioning
+MeChat is a clean, capable AI conversation platform for knowledge work, daily tasks and coding. Its visual identity is original: warm white, graphite, forest-green, bespoke M speech mark. ChatGPT-like ergonomic conventions are inspiration, not copied identity.
 
-## MVP
-- Verified accounts, sign-in and recovery through Better Auth and Brevo.
-- Conversations: create, rename, search, delete, reopen.
-- Streaming DeepSeek responses from a secure server adapter.
-- PostgreSQL persistence, authorization, quotas, model budget and retries.
-- Premium light-first UI, accessible responsive chat and code display.
+## Core journeys
+1. Guest visits / → /sign-in. User may create account at /sign-up.
+2. Email/password signup + six-digit OTP email verification, then login.
+3. Authenticated user enters the conversation-first workspace; no homepage.
+4. Create/continue/rename/delete chat, persist messages in Neon, stream answers from DeepSeek.
+5. Search chat history, copy replies, display Markdown/code, use light/dark mode, sign out.
 
-## Phase 1 implemented
-UI dashboard, voice transcription where supported, responsive chat preview and browser-local conversations. NO live AI, remote persistence, image generation or auth in this phase.
+## Non-negotiable UI
+- Typography and high-contrast readable message hierarchy, spacious but responsive.
+- Desktop collapsible sidebar, narrow mobile drawer, centered composer, accessible labels and keyboard support.
+- No emoji illustrations, flashy rainbow gradients, fake provider switches, unrelated cards or public chat demos.
+- Disabled/unavailable features must be absent or explicitly identified.
 
-## Later
-Groq model choice, file upload, rich media, voice-to-AI, optional image generation.
+## Readiness conditions
+- Verify registration, email delivery/expiry, duplicate email, session and reset flows.
+- Verify streaming answer, error recovery, quota and per-chat ownership.
+- Verify keyboard/touch, dark theme, mobile Safari and Android Chrome, accessible focus.
+- Verify all environment variables and DB schema migration applied.
+
+**Status:** Source implementation is being validated; live production readiness depends on configuring secrets, migrating DB schema and running end-to-end QA.
