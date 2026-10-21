@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { conversations } from "@/db/schema";
 import { getDatabase } from "@/db/client";
 import { getUserSession } from "@/lib/session";
