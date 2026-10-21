@@ -130,10 +130,6 @@ export function ChatWorkspace({user,initialConversationId=null}:{user:{name:stri
   historyQueryRef.current=debouncedSearch;
   let stale=false;
   const control=new AbortController();
-  setConversationsLoading(true);
-  setThreads([]);
-  setHistoryCursor(null);
-  setLoadError("");
   const url="/api/conversations?limit=25&q="+encodeURIComponent(debouncedSearch);
   apiJson(url,{signal:control.signal}).then(data=>{
    if(stale)return;
@@ -333,7 +329,7 @@ export function ChatWorkspace({user,initialConversationId=null}:{user:{name:stri
     <div className="sidebar-commands">
       <button className="command-new" onClick={startNew} title="New chat"><Plus size={19}/><span>New chat</span><span className="key-hint">⌘ ⇧ O</span></button>
       <button className="command-search" onClick={()=>{setSearchOpen(!searchOpen);setCollapsed(false);requestAnimationFrame(()=>searchRef.current?.focus())}} title="Search conversations"><Search size={19}/><span>Search chats</span><span className="key-hint">⌘ K</span></button>
-      {searchOpen&&<div className="sidebar-search-box"><Search size={16}/><input ref={searchRef} value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search history" aria-label="Search history"/><button className="icon-button" aria-label="Clear search" onClick={()=>{setSearch("");setSearchOpen(false)}}><X size={15}/></button></div>}
+      {searchOpen&&<div className="sidebar-search-box"><Search size={16}/><input ref={searchRef} value={search} onChange={e=>{setSearch(e.target.value);setConversationsLoading(true);setThreads([]);setHistoryCursor(null);setLoadError("")}} placeholder="Search history" aria-label="Search history"/><button className="icon-button" aria-label="Clear search" onClick={()=>{setSearch("");setConversationsLoading(true);setThreads([]);setHistoryCursor(null);setSearchOpen(false)}}><X size={15}/></button></div>}
     </div>
     <div className="sidebar-scroll">
       {!collapsed&&<div className="sidebar-section-hint">YOUR CONVERSATIONS</div>}
