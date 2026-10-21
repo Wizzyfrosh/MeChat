@@ -24,6 +24,15 @@ export async function POST(req:Request){
  if(!validUuid(requestId)||id&&!validUuid(id))return Response.json({error:"Invalid request ID"},{status:400});
  const db=getDatabase(), uid=session.user.id;
  try {
+  // Check existing conversation ownership before reserving quota or making provider calls.
+  let conversation:typeof conversations.$inferSelect|undefined;
+  if(id){
+    [conversation]=await db.select().from(conversations).where(and(eq(conversations.id,id),eq(conversations.userId,uid))).limit(1);
+    if(!conversation)return Response.json({error:"Conversation not found"},{status:404});
+    const existing=await db.select({id:messages.id}).from(messages)
+      .where(and(eq(messages.conversationId,id),eq(messages.requestId,requestId))).limit(1);
+    if(existing.length)return Response.json({error:"This message has already been submitted."},{status:409});
+  }
   // A single atomic upsert reserves this request before a potentially costly AI call.
   // Unlike counting prior events, concurrent requests cannot overrun the daily cap.
   const dailyCap=Math.max(1,Math.min(100,Number(process.env.AI_DAILY_MESSAGE_LIMIT)||30));
@@ -36,15 +45,10 @@ export async function POST(req:Request){
       setWhere:sql`${aiDailyQuotas.requests} < ${dailyCap}`,
     }).returning({requests:aiDailyQuotas.requests});
   if(!reservation)return Response.json({error:"You've reached today's message limit. Please try again tomorrow."},{status:429});
-  let conversation:typeof conversations.$inferSelect|undefined;
-  if(id){[conversation]=await db.select().from(conversations).where(and(eq(conversations.id,id),eq(conversations.userId,uid))).limit(1);
-     if(!conversation)return Response.json({error:"Conversation not found"},{status:404});}
-  else {
+  if(!id){
     [conversation]=await db.insert(conversations).values({userId:uid,title:content.slice(0,68)}).returning();
     id=conversation.id;
   }
-  const existing=await db.select({id:messages.id}).from(messages).where(and(eq(messages.conversationId,id!),eq(messages.requestId,requestId))).limit(1);
-  if(existing.length)return Response.json({error:"This message has already been submitted."},{status:409});
   const all=await db.select({role:messages.role,content:messages.content,status:messages.status}).from(messages).where(eq(messages.conversationId,id!)).orderBy(desc(messages.createdAt),desc(messages.id)).limit(16);
   const history=all.reverse().filter(m=>m.status==="complete"&&m.content).map(m=>({role:m.role,content:m.content}));
   await db.insert(messages).values([{conversationId:id!,requestId,role:"user",content,status:"complete"},{conversationId:id!,requestId,role:"assistant",content:"",status:"pending",provider:"deepseek",modelId:"deepseek-flash"}]);
