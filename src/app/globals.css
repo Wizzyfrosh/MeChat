@@ -171,3 +171,15 @@ h1,h2,h3,h4,p{margin-top:0}svg{flex-shrink:0}
 }
 @media(max-width:390px){.prompt-grid{grid-template-columns:1fr}.prompt-grid button{min-height:70px}.welcome-conversation>p{margin-bottom:19px}.auth-main{padding-inline:20px}.auth-brand-row>span{display:none}.auth-form-container{padding:45px 0}.auth-footer>span:last-child{display:none}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation-duration:.01ms!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
+
+/* MeChat model directory */
+.model-options{display:flex;flex-direction:column;gap:5px;max-height:320px;overflow-y:auto;margin-top:15px}
+.model-choice{display:flex;align-items:center;justify-content:space-between;text-align:left;gap:9px;border:1px solid transparent;background:transparent;border-radius:10px;padding:12px 10px;width:100%;color:var(--ink)}
+.model-choice:hover:not(:disabled){background:var(--hover)}
+.model-choice.active{background:var(--accent-tint);border-color:var(--accent)}
+.model-choice>span{display:flex;flex-direction:column;gap:5px;min-width:0;flex:1}
+.model-choice strong{font-size:12px;font-weight:700}
+.model-choice small{font-size:10px;line-height:1.55;font-weight:450;color:var(--secondary)}
+.model-choice:disabled{opacity:.5;cursor:not-allowed}.model-choice svg{color:var(--accent)}
+.model-popover{width:min(365px,calc(100vw - 24px));max-height:min(78vh,580px);overflow-y:auto}
+.model-privacy{font-size:11px!important;color:var(--secondary);padding-top:13px;border-top:1px solid var(--hairline);line-height:1.6!important}
