@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, ArrowRight, Headphones, Mic, Pause, ShieldCheck, Waves, X } from "lucide-react";
@@ -14,16 +14,19 @@ type Recognition={
  start:()=>void;stop:()=>void;
 };
 type RecognitionCtor=new()=>Recognition;
+const subscribeSpeechSupport=()=>()=>{};
+function getSpeechSupport():boolean {
+ const w=window as typeof window & {SpeechRecognition?:RecognitionCtor;webkitSpeechRecognition?:RecognitionCtor};
+ return Boolean(w.SpeechRecognition||w.webkitSpeechRecognition);
+}
 export function VoiceExperience(){
  const router=useRouter();
  const active=useRef<Recognition|null>(null);
- const [supported,setSupported]=useState<boolean|null>(null);
+ const supported=useSyncExternalStore(subscribeSpeechSupport,getSpeechSupport,()=>null);
  const [listening,setListening]=useState(false);
  const [transcript,setTranscript]=useState("");
  const [error,setError]=useState("");
  useEffect(()=>{
-   const w=window as typeof window & {SpeechRecognition?:RecognitionCtor;webkitSpeechRecognition?:RecognitionCtor};
-   setSupported(!!(w.SpeechRecognition||w.webkitSpeechRecognition));
    try { document.documentElement.dataset.theme = localStorage.getItem("mechat:theme")==="dark" ? "dark" : "light"; } catch {}
    return ()=>{active.current?.stop();active.current=null};
  },[]);
