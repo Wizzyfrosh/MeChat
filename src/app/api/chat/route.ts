@@ -6,6 +6,7 @@ import {DeepSeekStreamAccumulator} from "@/lib/deepseek-stream.mjs";
 import {getDeepSeekAvailability} from "@/lib/deepseek-provider";
 import {getProviderDirectory,providerCandidates,createProviderRequest,providerFailure,type ActiveProvider,type ModelSelection,type PromptMessage} from "@/lib/ai-providers";
 import {shouldAutoTryNext} from "@/lib/ai-provider-routing.mjs";
+import {recentMessageOrder} from "@/lib/message-order";
 
 export const runtime="nodejs";
 export const maxDuration=60;
@@ -63,7 +64,7 @@ export async function POST(req:Request){
   if(existing)return json({error:"This request was already submitted."},409);
 
   const rows=oldId?await db.select({role:messages.role,content:messages.content,status:messages.status}).from(messages)
-    .where(eq(messages.conversationId,oldId)).orderBy(desc(messages.createdAt),desc(messages.requestId),desc(messages.role)).limit(16):[];
+    .where(eq(messages.conversationId,oldId)).orderBy(...recentMessageOrder).limit(16):[];
   const history:PromptMessage[]=rows.reverse().filter(m=>m.status==="complete"&&m.content).map(m=>({role:m.role,content:m.content}));
   const prompt:PromptMessage[]=[{role:"system",content:instruction},...history,{role:"user",content}];
 
