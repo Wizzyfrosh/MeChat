@@ -22,5 +22,7 @@ jobs:
         run: npm run lint
       - name: Type check
         run: npm run typecheck
+      - name: Stream parser unit tests
+        run: npm run test:unit
       - name: Production build
         run: npm run build
