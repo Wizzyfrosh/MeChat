@@ -7,6 +7,7 @@ import {getDeepSeekAvailability} from "@/lib/deepseek-provider";
 import {getProviderDirectory,providerCandidates,createProviderRequest,providerFailure,type ActiveProvider,type ModelSelection,type PromptMessage} from "@/lib/ai-providers";
 import {shouldAutoTryNext} from "@/lib/ai-provider-routing.mjs";
 import {recentMessageOrder} from "@/lib/message-order";
+import {readBoundedChatJson,buildBoundedHistory} from "@/lib/chat-safety.mjs";
 
 export const runtime="nodejs";
 export const maxDuration=60;
@@ -21,7 +22,10 @@ export async function POST(req:Request){
  if(!session.user.emailVerified)return json({error:"Verify your email first."},403);
  if(req.headers.get("origin")&&req.headers.get("origin")!==new URL(req.url).origin)return json({error:"Invalid origin."},403);
 
- const body=await req.json().catch(()=>null);
+ const parsed=await readBoundedChatJson(req);
+ if(!parsed.ok)return json({error:parsed.error},parsed.status);
+ const body=parsed.value && typeof parsed.value==="object" && !Array.isArray(parsed.value)
+  ? parsed.value as Record<string,unknown> : null;
  const content=typeof body?.content==="string"?body.content.trim():"";
  const requestId=typeof body?.requestId==="string"?body.requestId:"";
  const oldId=typeof body?.conversationId==="string"?body.conversationId:null;
@@ -63,9 +67,9 @@ export async function POST(req:Request){
   const [existing]=await db.select({id:usageEvents.id}).from(usageEvents).where(eq(usageEvents.requestId,requestId)).limit(1);
   if(existing)return json({error:"This request was already submitted."},409);
 
-  const rows=oldId?await db.select({role:messages.role,content:messages.content,status:messages.status}).from(messages)
-    .where(eq(messages.conversationId,oldId)).orderBy(...recentMessageOrder).limit(16):[];
-  const history:PromptMessage[]=rows.reverse().filter(m=>m.status==="complete"&&m.content).map(m=>({role:m.role,content:m.content}));
+  const rows=oldId?await db.select({requestId:messages.requestId,role:messages.role,content:messages.content,status:messages.status}).from(messages)
+    .where(eq(messages.conversationId,oldId)).orderBy(...recentMessageOrder).limit(32):[];
+  const history:PromptMessage[]=buildBoundedHistory(rows.reverse());
   const prompt:PromptMessage[]=[{role:"system",content:instruction},...history,{role:"user",content}];
 
   // Quotas are atomic across concurrent requests/tabs.
