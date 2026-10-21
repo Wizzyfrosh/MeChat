@@ -1,5 +1,5 @@
 import {and,eq,sql} from "drizzle-orm";
-import {aiDailyQuotas,conversations,messages,usageEvents} from "@/db/schema";
+import {aiDailyQuotas,conversations,messages,usageEvents,userSettings} from "@/db/schema";
 import {getDatabase} from "@/db/client";
 import {getUserSession} from "@/lib/session";
 import {DeepSeekStreamAccumulator} from "@/lib/deepseek-stream.mjs";
@@ -8,6 +8,7 @@ import {getProviderDirectory,providerCandidates,createProviderRequest,providerFa
 import {shouldAutoTryNext} from "@/lib/ai-provider-routing.mjs";
 import {recentMessageOrder} from "@/lib/message-order";
 import {readBoundedChatJson,buildBoundedHistory} from "@/lib/chat-safety.mjs";
+import {responseStyleInstruction} from "@/lib/user-preferences.mjs";
 
 export const runtime="nodejs";
 export const maxDuration=60;
@@ -70,7 +71,10 @@ export async function POST(req:Request){
   const rows=oldId?await db.select({requestId:messages.requestId,role:messages.role,content:messages.content,status:messages.status}).from(messages)
     .where(eq(messages.conversationId,oldId)).orderBy(...recentMessageOrder).limit(32):[];
   const history:PromptMessage[]=buildBoundedHistory(rows.reverse());
-  const prompt:PromptMessage[]=[{role:"system",content:instruction},...history,{role:"user",content}];
+  const [settings]=await db.select({responseStyle:userSettings.responseStyle})
+    .from(userSettings).where(eq(userSettings.userId,uid)).limit(1);
+  // Never trust a request-supplied style: use only this account's stored enum.
+  const prompt:PromptMessage[]=[{role:"system",content:instruction+" "+responseStyleInstruction(settings?.responseStyle??"balanced")},...history,{role:"user",content}];
 
   // Quotas are atomic across concurrent requests/tabs.
   const [slot]=await db.insert(aiDailyQuotas).values({userId:uid,day,requests:1}).onConflictDoUpdate({
