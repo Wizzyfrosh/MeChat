@@ -1,50 +1,55 @@
 # MeChat
 
-MeChat is an authentication-first, conversation-centered AI web application built with Next.js, Better Auth, Neon PostgreSQL, Brevo email OTP, and server-side DeepSeek streaming.
+**MeChat is an authentication-first AI chat web application.** This repository contains a responsive chat workspace, email/password authentication with six-digit email verification, PostgreSQL conversation persistence, and a server-side DeepSeek streaming endpoint.
 
-## Routes
+## Product flow
 
-- `/` redirects to `/sign-in` or `/chat` depending on the server session.
-- `/sign-in`, `/sign-up`, `/verify-email`, `/reset-password` provide registration, sign-in, email OTP verification, and password recovery.
-- `/chat` is the protected workspace. `/chat/[id]` loads an existing conversation.
-- `/api/auth/[...all]` handles Better Auth requests.
-- `/api/conversations`, `/api/conversations/[id]`, `/api/chat` serve session-protected chat operations.
+- Visiting `/` redirects guests to `/sign-in` and signed-in users to `/chat`.
+- `/sign-up` creates an account; Brevo delivers the six-digit verification email.
+- After verification and login, the chat workspace provides conversations, search, rename/delete, streaming model answers, Markdown/code rendering, light/dark mode, and settings.
+- A conversation is only visible to its signed-in owner.
 
-## Design
+There is **no homepage, demo chat, or publicly accessible model endpoint** in this version.
 
-The public landing dashboard has been removed. The redesigned UI follows a neutral, editorial style with a custom SVG monogram, warm-gray surfaces, subtle dark-teal accents, excellent message readability and mobile drawer navigation. Appearance can be switched between light and dark.
+## Tech stack
 
-## Setup
+Next.js 16, React 19, TypeScript, Tailwind CSS, Better Auth + email OTP, Brevo transactional email, Drizzle ORM, Neon PostgreSQL, and DeepSeek Chat Completions (SSE). Deployment target: Vercel.
 
-Copy `.env.example` to `.env.local` and configure:
+## Run locally
 
-```
-DATABASE_URL=
-BETTER_AUTH_URL=http://localhost:3000
-BETTER_AUTH_SECRET=
-BREVO_API_KEY=
-BREVO_SENDER_EMAIL=
-DEEPSEEK_API_KEY=
-DEEPSEEK_MODEL=deepseek-flash
-```
-
-Use a real, verified Brevo sender. Keep all keys on the server, never use `NEXT_PUBLIC_` for these secrets. The app must have database migrations applied before authentication and conversations work.
-
-```sh
+```bash
 npm install
-npm run db:generate
-# Review generated SQL, test on a Neon preview/dev branch, then get migration approval.
-npm run db:migrate
-npm run lint
-npm run build
+cp .env.example .env.local
+npm run dev
 ```
 
-**Do not apply migrations to the Neon production branch without review and explicit approval.**
+Set the environment values using your secret manager before expecting authentication, model answers, or persistence. Run `npm run lint`, `npm run typecheck`, and `npm run build`.
 
-## Current status
+## Required environment
 
-The full server routes and frontend flow are implemented in source. They require valid secrets, migrations, and end-to-end testing to become a functioning production service. The absence of credentials is surfaced as an unavailable authentication service, not faked sign-in. There is no demo chatbot mode.
+`DATABASE_URL` — dedicated Neon PostgreSQL connection string.
 
-## Security considerations
+`BETTER_AUTH_URL` — the actual scheme + host of the deployment, e.g. `https://mechat.example.com`.
 
-Server checks sessions, verifies email, and scopes conversation reads/mutations to the authenticated owner. The AI key is only used server-side. Message input and model output are bounded; per-user daily message quotas and idempotency request IDs are recorded. Prior to public rollout, add a stronger atomic/concurrent request quota, provider cost reconciliation, alerting, observability, and resilience testing.
+`BETTER_AUTH_SECRET` — long random secret (minimum 32 bytes).
+
+`BREVO_API_KEY` and `BREVO_SENDER_EMAIL` — verified sender credentials.
+
+`DEEPSEEK_API_KEY` — server-side inference credential.
+
+Optional `AI_DAILY_MESSAGE_LIMIT` — server-side quota, default 30 messages per user/day.
+
+**Never** put credentials in `NEXT_PUBLIC_*`, browser storage, committed files, or chat screenshots.
+
+## Database releases
+
+Code generation: `npm run db:generate`. Inspect SQL on a disposable Neon development branch, then request explicit approval before applying schema to the real database. Authentication will not function until the schema has been migrated.
+
+## Deployment and release gates
+
+- Runtime features are not considered live until credentials and database tables exist, and the signup → OTP → login → stream → revisit workflow has been tested.
+- Perform mobile/desktop visual QA and accessibility testing before release.
+- Validate OTP expiry/retry, duplicate signup, per-conversation authorization, chat quotas, session handling, streamed errors and restarts.
+- Avoid publishing a claim that MeChat is production-ready before these gates pass.
+
+See `docs/` for implementation roadmap and security notes.
