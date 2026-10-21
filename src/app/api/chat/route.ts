@@ -3,6 +3,7 @@ import { aiDailyQuotas, conversations, messages, usageEvents } from "@/db/schema
 import { getDatabase } from "@/db/client";
 import { getUserSession } from "@/lib/session";
 import { DeepSeekStreamAccumulator } from "@/lib/deepseek-stream.mjs";
+import { getDeepSeekAvailability, deepSeekRequestError } from "@/lib/deepseek-provider";
 
 export const runtime="nodejs";
 export const maxDuration=60;
@@ -22,6 +23,20 @@ export async function POST(req:Request){
  let id=typeof body?.conversationId==="string"?body.conversationId:null;
  const requestId=typeof body?.requestId==="string"?body.requestId:"";
  if(!validUuid(requestId)||id&&!validUuid(id))return Response.json({error:"Invalid request ID"},{status:400});
+ // Reject unusable provider credentials before writing messages or reserving quota.
+ const providerStatus=await getDeepSeekAvailability();
+ if(providerStatus==="insufficient-balance"){
+   const issue=deepSeekRequestError(402);
+   return Response.json({error:issue.message,reason:issue.reason},{status:issue.httpStatus});
+ }
+ if(providerStatus==="invalid-api-key"){
+   const issue=deepSeekRequestError(401);
+   return Response.json({error:issue.message,reason:issue.reason},{status:issue.httpStatus});
+ }
+ if(providerStatus==="rate-limited"){
+   const issue=deepSeekRequestError(429);
+   return Response.json({error:issue.message,reason:issue.reason},{status:issue.httpStatus});
+ }
  const db=getDatabase(), uid=session.user.id;
  let persistedId:string|null=null;
  try {
@@ -76,8 +91,11 @@ export async function POST(req:Request){
   }
   if(!response.ok||!response.body){
     clearTimeout(limit);
+    // Never log the response body or credentials; status alone is sufficient for diagnosis.
+    console.warn("MeChat DeepSeek HTTP failure",response.status);
     await db.update(messages).set({status:"failed"}).where(and(eq(messages.conversationId,id!),eq(messages.requestId,requestId),eq(messages.role,"assistant")));
-    return Response.json({error:response.status===429?"AI provider rate limit reached.":"Unable to generate a response right now.",conversationId:persistedId},{status:response.status===429?429:502});
+    const issue=deepSeekRequestError(response.status);
+    return Response.json({error:issue.message,reason:issue.reason,conversationId:persistedId},{status:issue.httpStatus});
   }
   const conversationId=id!,encoder=new TextEncoder();
   const stream=new ReadableStream<Uint8Array>({
