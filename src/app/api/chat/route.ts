@@ -23,16 +23,21 @@ export async function POST(req:Request){
  const requestId=typeof body?.requestId==="string"?body.requestId:"";
  if(!validUuid(requestId)||id&&!validUuid(id))return Response.json({error:"Invalid request ID"},{status:400});
  const db=getDatabase(), uid=session.user.id;
+ let persistedId:string|null=null;
  try {
   // Check existing conversation ownership before reserving quota or making provider calls.
   let conversation:typeof conversations.$inferSelect|undefined;
   if(id){
     [conversation]=await db.select().from(conversations).where(and(eq(conversations.id,id),eq(conversations.userId,uid))).limit(1);
     if(!conversation)return Response.json({error:"Conversation not found"},{status:404});
+    persistedId=id;
     const existing=await db.select({id:messages.id}).from(messages)
       .where(and(eq(messages.conversationId,id),eq(messages.requestId,requestId))).limit(1);
     if(existing.length)return Response.json({error:"This message has already been submitted."},{status:409});
   }
+  const [priorRequest]=await db.select({userId:usageEvents.userId,conversationId:usageEvents.conversationId})
+    .from(usageEvents).where(eq(usageEvents.requestId,requestId)).limit(1);
+  if(priorRequest)return Response.json({error:"This message has already been submitted.",conversationId:priorRequest.userId===uid?priorRequest.conversationId:null},{status:409});
   // A single atomic upsert reserves this request before a potentially costly AI call.
   // Unlike counting prior events, concurrent requests cannot overrun the daily cap.
   const dailyCap=Math.max(1,Math.min(100,Number(process.env.AI_DAILY_MESSAGE_LIMIT)||30));
@@ -48,6 +53,7 @@ export async function POST(req:Request){
   if(!id){
     [conversation]=await db.insert(conversations).values({userId:uid,title:content.slice(0,68)}).returning();
     id=conversation.id;
+    persistedId=id;
   }
   const all=await db.select({role:messages.role,content:messages.content,status:messages.status}).from(messages).where(eq(messages.conversationId,id!)).orderBy(desc(messages.createdAt),desc(messages.id)).limit(16);
   const history=all.reverse().filter(m=>m.status==="complete"&&m.content).map(m=>({role:m.role,content:m.content}));
@@ -67,19 +73,19 @@ export async function POST(req:Request){
   }catch{
     clearTimeout(limit);
     await db.update(messages).set({status:"failed"}).where(and(eq(messages.conversationId,id!),eq(messages.requestId,requestId),eq(messages.role,"assistant")));
-    return Response.json({error:"AI provider is temporarily unavailable."},{status:502});
+    return Response.json({error:"AI provider is temporarily unavailable.",conversationId:persistedId},{status:502});
   }
   if(!response.ok||!response.body){
     clearTimeout(limit);
     await db.update(messages).set({status:"failed"}).where(and(eq(messages.conversationId,id!),eq(messages.requestId,requestId),eq(messages.role,"assistant")));
-    return Response.json({error:response.status===429?"AI provider rate limit reached.":"Unable to generate a response right now."},{status:response.status===429?429:502});
+    return Response.json({error:response.status===429?"AI provider rate limit reached.":"Unable to generate a response right now.",conversationId:persistedId},{status:response.status===429?429:502});
   }
   const conversationId=id!,encoder=new TextEncoder(),decoder=new TextDecoder();
   const stream=new ReadableStream<Uint8Array>({
    async start(controller){
     const emit=(event:string,payload:unknown)=>controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`));
     emit("meta",{conversationId});
-    let answer="",buffer="",usage:{prompt_tokens?:number;completion_tokens?:number}={},failed=false;
+    let answer="",buffer="",usage:{prompt_tokens?:number;completion_tokens?:number}={},failed=false,receivedDone=false,finishReason="";
     try{
      const reader=response.body!.getReader();let done=false;
      while(!done){
@@ -88,32 +94,32 @@ export async function POST(req:Request){
       const lines=buffer.split(/\r?\n/);buffer=lines.pop()??"";
       for(const line of lines){
        if(!line.startsWith("data: "))continue;
-       const data=line.slice(6).trim();if(data==="[DONE]"){done=true;break}
+       const data=line.slice(6).trim();if(data==="[DONE]"){receivedDone=true;done=true;break}
        try{
         const chunk=JSON.parse(data) as ProviderChunk;
         if(chunk.usage)usage=chunk.usage;
-        const delta=chunk.choices?.[0]?.delta?.content;
+        const choice=chunk.choices?.[0];
+        if(typeof choice?.finish_reason==="string")finishReason=choice.finish_reason;
+        const delta=choice?.delta?.content;
         if(typeof delta==="string"&&delta.length){
          answer+=delta;
-         if(answer.length>40000){failed=true;done=true;break}
+         if(answer.length>40000){failed=true;done=true;ctrl.abort();break}
          emit("delta",{text:delta});
         }
        }catch{}
       }
      }
-     if(!answer)failed=true;
-     if(!failed)emit("done",{conversationId});
-     else emit("error",{message:"The response was interrupted."});
+     if(!answer.trim()||!receivedDone||(finishReason!==""&&finishReason!=="stop"))failed=true;
     }catch{
      failed=true;
-     try{emit("error",{message:"The connection to the model was interrupted."})}catch{}
     }finally{
       clearTimeout(limit);
       try{
        await db.update(messages).set({content:answer,status:failed?"interrupted":"complete",inputTokens:usage.prompt_tokens??null,outputTokens:usage.completion_tokens??null})
         .where(and(eq(messages.conversationId,conversationId),eq(messages.requestId,requestId),eq(messages.role,"assistant")));
        await db.update(usageEvents).set({inputTokens:usage.prompt_tokens??0,outputTokens:usage.completion_tokens??0}).where(eq(usageEvents.requestId,requestId));
-      }catch{/* Keep sensitive data out of logs; retry/recovery belongs in operations runbook. */}
+      }catch{failed=true; /* Never announce completion if persistence fails. */}
+      try{if(!failed)emit("done",{conversationId});else emit("error",{message:"The response was interrupted or could not be saved."})}catch{}
       try{controller.close()}catch{}
     }
    },
@@ -121,6 +127,7 @@ export async function POST(req:Request){
   });
   return new Response(stream,{headers:{"Content-Type":"text/event-stream; charset=utf-8","Cache-Control":"no-cache, no-transform","X-Accel-Buffering":"no","X-Content-Type-Options":"nosniff"}});
  }catch{
-  return Response.json({error:"Unable to process this message right now."},{status:503});
+  // If an error occurs after a conversation was created, return its ID to recover saved messages.
+  return Response.json({error:"Unable to process this message right now.",conversationId:persistedId},{status:503});
  }
 }
