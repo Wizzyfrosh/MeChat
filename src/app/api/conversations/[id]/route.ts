@@ -18,7 +18,7 @@ export async function GET(_req:Request,ctx:Ctx){
   const db=getDatabase();
   const [row]=await db.select().from(conversations).where(and(eq(conversations.id,id),eq(conversations.userId,session.user.id))).limit(1);
   if(!row)return Response.json({error:"Conversation not found"},{status:404});
-  const content=(await db.select({id:messages.id,role:messages.role,content:messages.content,status:messages.status,createdAt:messages.createdAt,provider:messages.provider,modelId:messages.modelId}).from(messages).where(eq(messages.conversationId,id)).orderBy(desc(messages.createdAt),desc(messages.requestId),asc(messages.role)).limit(250)).reverse();
+  const content=(await db.select({id:messages.id,role:messages.role,content:messages.content,status:messages.status,createdAt:messages.createdAt,provider:messages.provider,modelId:messages.modelId}).from(messages).where(eq(messages.conversationId,id)).orderBy(desc(messages.createdAt),desc(messages.requestId),desc(messages.role)).limit(250)).reverse();
   return Response.json({conversation:row,messages:content},{headers:{"Cache-Control":"no-store"}});
  }catch{return Response.json({error:"Unable to load conversation"},{status:503})}
 }
