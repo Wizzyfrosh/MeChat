@@ -1,9 +1,9 @@
 import "server-only";
 
-export async function sendOtpEmail(address: string, code: string, kind: "sign-in"|"email-verification"|"forget-password") {
+export async function sendOtpEmail(address: string, code: string, kind: "sign-in"|"email-verification"|"forget-password"|"change-email") {
  const apiKey=process.env.BREVO_API_KEY, sender=process.env.BREVO_SENDER_EMAIL;
  if(!apiKey||!sender) throw new Error("Email delivery is not configured");
- const titles={"sign-in":"Your MeChat sign-in code","email-verification":"Verify your MeChat email","forget-password":"Reset your MeChat password"};
+ const titles={"sign-in":"Your MeChat sign-in code","email-verification":"Verify your MeChat email","forget-password":"Reset your MeChat password","change-email":"Confirm your MeChat email change"};
  const subject=titles[kind];
  const digits=code.replace(/[^0-9]/g,"");
  if(digits.length!==6) throw new Error("OTP is invalid");
