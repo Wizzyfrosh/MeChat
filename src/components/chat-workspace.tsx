@@ -3,7 +3,7 @@ import { FormEvent, KeyboardEvent, useEffect, useRef, useState, useSyncExternalS
 import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ArrowDown, ArrowUp, Check, ChevronDown, CircleHelp, Copy, Ellipsis, FileText, LogOut, Menu, MessageCircle, Moon, PanelLeftClose, PanelLeftOpen, Pencil, Plus, Search, Settings2, ShieldCheck, Sparkles, Sun, Trash2, UserRound, X } from "lucide-react";
+import { ArrowUp, Check, ChevronDown, CircleHelp, Copy, Ellipsis, FileText, LogOut, Menu, MessageCircle, Moon, PanelLeftClose, PanelLeftOpen, Pencil, Plus, Search, Settings2, ShieldCheck, Sparkles, Sun, Trash2, UserRound, X } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
 import { MeChatLogo, MeChatSymbol } from "@/components/logo";
 
