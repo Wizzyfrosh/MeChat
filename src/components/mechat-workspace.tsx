@@ -36,14 +36,18 @@ export function MeChatWorkspace(){
  const composer=useRef<HTMLTextAreaElement>(null);
  const bottom=useRef<HTMLDivElement>(null);
  useEffect(()=>{
-   try{
-     const saved=localStorage.getItem(KEY);
-     if(saved){const value:unknown=JSON.parse(saved);if(validThreads(value))setThreads(value);}
-     const pending=sessionStorage.getItem("mechat:pending-prompt");
-     if(pending){setInput(pending.slice(0,4000));sessionStorage.removeItem("mechat:pending-prompt");}
-     document.documentElement.dataset.theme=localStorage.getItem("mechat:theme")==="dark"?"dark":"light";
-   }catch{}
-   setLoaded(true);
+   // Restore preview-only browser storage after hydration.
+   const frame=window.requestAnimationFrame(()=>{
+     try{
+       const saved=localStorage.getItem(KEY);
+       if(saved){const value:unknown=JSON.parse(saved);if(validThreads(value))setThreads(value);}
+       const pending=sessionStorage.getItem("mechat:pending-prompt");
+       if(pending){setInput(pending.slice(0,4000));sessionStorage.removeItem("mechat:pending-prompt");}
+       document.documentElement.dataset.theme=localStorage.getItem("mechat:theme")==="dark"?"dark":"light";
+     }catch{}
+     setLoaded(true);
+   });
+   return ()=>window.cancelAnimationFrame(frame);
  },[]);
  useEffect(()=>{if(!loaded)return;try{localStorage.setItem(KEY,JSON.stringify(threads))}catch{}},[threads,loaded]);
  useEffect(()=>bottom.current?.scrollIntoView({block:"end",behavior:"smooth"}),[active,threads]);
