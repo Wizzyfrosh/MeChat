@@ -1,5 +1,5 @@
-import { and, asc, count, eq, gte } from "drizzle-orm";
-import { conversations, messages, usageEvents } from "@/db/schema";
+import { and, asc, eq, sql } from "drizzle-orm";
+import { aiDailyQuotas, conversations, messages, usageEvents } from "@/db/schema";
 import { getDatabase } from "@/db/client";
 import { getUserSession } from "@/lib/session";
 
@@ -24,10 +24,18 @@ export async function POST(req:Request){
  if(!validUuid(requestId)||id&&!validUuid(id))return Response.json({error:"Invalid request ID"},{status:400});
  const db=getDatabase(), uid=session.user.id;
  try {
-  const cutoff=new Date();cutoff.setUTCHours(0,0,0,0);
-  const [day]=await db.select({total:count()}).from(usageEvents).where(and(eq(usageEvents.userId,uid),gte(usageEvents.createdAt,cutoff)));
+  // A single atomic upsert reserves this request before a potentially costly AI call.
+  // Unlike counting prior events, concurrent requests cannot overrun the daily cap.
   const dailyCap=Math.max(1,Math.min(100,Number(process.env.AI_DAILY_MESSAGE_LIMIT)||30));
-  if(day.total>=dailyCap)return Response.json({error:"You've reached today's message limit. Please try again tomorrow."},{status:429});
+  const utcDay=new Date().toISOString().slice(0,10);
+  const [reservation]=await db.insert(aiDailyQuotas)
+    .values({userId:uid,day:utcDay,requests:1})
+    .onConflictDoUpdate({
+      target:[aiDailyQuotas.userId,aiDailyQuotas.day],
+      set:{requests:sql`${aiDailyQuotas.requests} + 1`,updatedAt:new Date()},
+      setWhere:sql`${aiDailyQuotas.requests} < ${dailyCap}`,
+    }).returning({requests:aiDailyQuotas.requests});
+  if(!reservation)return Response.json({error:"You've reached today's message limit. Please try again tomorrow."},{status:429});
   let conversation:typeof conversations.$inferSelect|undefined;
   if(id){[conversation]=await db.select().from(conversations).where(and(eq(conversations.id,id),eq(conversations.userId,uid))).limit(1);
      if(!conversation)return Response.json({error:"Conversation not found"},{status:404});}
