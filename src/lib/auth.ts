@@ -10,11 +10,8 @@ import { sendOtpEmail } from "@/lib/mail";
 export function isAuthConfigured(){
  return Boolean(process.env.DATABASE_URL && process.env.BETTER_AUTH_SECRET && process.env.BREVO_API_KEY && process.env.BREVO_SENDER_EMAIL && process.env.BETTER_AUTH_URL);
 }
-let cached: ReturnType<typeof betterAuth> | undefined;
-export function getAuth(){
- if(!isAuthConfigured()) throw new Error("MeChat authentication environment is incomplete");
- if(!cached){
-   cached=betterAuth({
+function buildAuth(){
+ return betterAuth({
     baseURL:process.env.BETTER_AUTH_URL!,
     secret:process.env.BETTER_AUTH_SECRET!,
     database:drizzleAdapter(getDatabase(),{provider:"pg",schema:{...applicationSchema,...authSchema}}),
@@ -28,6 +25,9 @@ export function getAuth(){
       },
     })],
    });
- }
- return cached;
+}
+let cached: ReturnType<typeof buildAuth> | undefined;
+export function getAuth(){
+ if(!isAuthConfigured()) throw new Error("MeChat authentication environment is incomplete");
+ return cached ?? (cached = buildAuth());
 }
