@@ -1,9 +1,23 @@
-# MeChat engineering standards
-- Next.js App Router, TypeScript strict and a modular monolith.
-- Phase 1 is a UI preview: never fabricate AI responses or claim that authentication works.
-- Never place API keys in client components or NEXT_PUBLIC_ settings.
-- Route Handlers must authenticate each request and check conversation ownership when backend work begins.
-- Enforce quota checks and spending ceilings before model calls.
-- Avoid logging message bodies, avoid unsafe HTML insertion, and mark interrupted model messages.
-- Prefer accessible reusable components and browser testing on mobile and desktop.
-- No fake payments, uploads, voice AI or mocked backend features presented as live.
+# MeChat — Engineering contract
+
+Production-oriented, authentication-first AI chat. No homepage. UI direction: quiet typography, warm neutral surfaces, graphite text, restrained deep green accent, original monogram. No emojis or generic AI illustrations. Never invent functioning features, costs, model responses or login success.
+
+## Framework and structure
+- Next.js App Router, React, strict TypeScript, server-only secrets.
+- Drizzle ORM + Neon PostgreSQL and Better Auth + Brevo OTP.
+- Keep provider credentials isolated in server Route Handlers. DeepSeek is primary.
+- No mock conversation state in deployed UI: backend persistence only.
+
+## Required security
+- Resolve identity via verified server sessions; do not trust userId from requests.
+- Every chat mutation and read must filter by authenticated owner.
+- Check CSRF/trusted origin for mutations; protect auth endpoints with Better Auth.
+- Rate limits and daily quotas, bounded message length and history, provider timeouts and model output limits.
+- No XSS from model output; do not use untrusted HTML. No logs containing personal chat content, OTP or credentials.
+- On interrupted streams, keep durable explicit status instead of pretending the reply completed.
+- Do not change production DB without reviewed migrations and explicit authorization.
+
+## Delivery
+- Commit changes on feature branches, lint + typecheck + build, confirm route ownership behavior.
+- Don't merge design changes until reviewed on narrow mobile and desktop viewports.
+- Keep credentials in environment management and supply a clear release checklist.
