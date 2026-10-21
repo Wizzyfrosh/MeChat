@@ -1,4 +1,4 @@
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { aiDailyQuotas, conversations, messages, usageEvents } from "@/db/schema";
 import { getDatabase } from "@/db/client";
 import { getUserSession } from "@/lib/session";
@@ -30,7 +30,6 @@ export async function POST(req:Request){
   if(id){
     [conversation]=await db.select().from(conversations).where(and(eq(conversations.id,id),eq(conversations.userId,uid))).limit(1);
     if(!conversation)return Response.json({error:"Conversation not found"},{status:404});
-    persistedId=id;
     const existing=await db.select({id:messages.id}).from(messages)
       .where(and(eq(messages.conversationId,id),eq(messages.requestId,requestId))).limit(1);
     if(existing.length)return Response.json({error:"This message has already been submitted."},{status:409});
@@ -53,11 +52,11 @@ export async function POST(req:Request){
   if(!id){
     [conversation]=await db.insert(conversations).values({userId:uid,title:content.slice(0,68)}).returning();
     id=conversation.id;
-    persistedId=id;
   }
-  const all=await db.select({role:messages.role,content:messages.content,status:messages.status}).from(messages).where(eq(messages.conversationId,id!)).orderBy(desc(messages.createdAt),desc(messages.id)).limit(16);
+  const all=await db.select({role:messages.role,content:messages.content,status:messages.status}).from(messages).where(eq(messages.conversationId,id!)).orderBy(desc(messages.createdAt),desc(messages.requestId),asc(messages.role)).limit(16);
   const history=all.reverse().filter(m=>m.status==="complete"&&m.content).map(m=>({role:m.role,content:m.content}));
   await db.insert(messages).values([{conversationId:id!,requestId,role:"user",content,status:"complete"},{conversationId:id!,requestId,role:"assistant",content:"",status:"pending",provider:"deepseek",modelId:"deepseek-flash"}]);
+  persistedId=id;
   await db.insert(usageEvents).values({userId:uid,conversationId:id!,requestId,provider:"deepseek",modelId:"deepseek-flash",inputTokens:0,outputTokens:0});
   await db.update(conversations).set({updatedAt:new Date()}).where(eq(conversations.id,id!));
   const model="deepseek-flash";
@@ -109,7 +108,7 @@ export async function POST(req:Request){
        }catch{}
       }
      }
-     if(!answer.trim()||!receivedDone||(finishReason!==""&&finishReason!=="stop"))failed=true;
+     if(!answer.trim()||!receivedDone||(finishReason!=="stop"))failed=true;
     }catch{
      failed=true;
     }finally{
@@ -127,7 +126,10 @@ export async function POST(req:Request){
   });
   return new Response(stream,{headers:{"Content-Type":"text/event-stream; charset=utf-8","Cache-Control":"no-cache, no-transform","X-Accel-Buffering":"no","X-Content-Type-Options":"nosniff"}});
  }catch{
-  // If an error occurs after a conversation was created, return its ID to recover saved messages.
+  // Keep the saved message visible while clearly marking unfinished AI output.
+  if(persistedId){
+    try{await db.update(messages).set({status:"failed"}).where(and(eq(messages.conversationId,persistedId),eq(messages.requestId,requestId),eq(messages.role,"assistant"),eq(messages.status,"pending")))}catch{}
+  }
   return Response.json({error:"Unable to process this message right now.",conversationId:persistedId},{status:503});
  }
 }
