@@ -1,41 +1,35 @@
-# MeChat database architecture — Phase 2 foundation
+# MeChat database: schema and migrations
 
-## Provisioning (2026-10-21)
-- Dedicated Neon project: `orange-bar-92581848` (MeChat).
-- Postgres database: `mechat`; default branch: `main`.
-- Neon selected `aws-us-west-2`. This is a **development baseline**, not an assertion that Oregon is optimal for Nigeria-based users. Before placing real user data, choose a coordinated Vercel function and database region. Region migration requires a new Neon project/transfer.
-- No application tables have been migrated into Neon yet.
-- Credentials belong in the deployment environment, not this repository.
+## Environments (2026-10-21)
 
-## Schema source
-- `src/db/schema.ts`: typed Drizzle tables for conversations, messages, settings, usage events.
-- `src/db/client.ts`: lazy server-only Neon HTTP connection. Build does not need a DB URL.
-- `drizzle.config.ts`: schema and migration configuration.
+- Neon project: `orange-bar-92581848` (MeChat).
+- Database: `mechat` on PostgreSQL 18.
+- **Production/main branch:** `br-square-cake-arbrz98c`. Initial application migration has **NOT** been applied.
+- **Preview branch:** `br-blue-cake-ar9amf8p` (`mechat-preview`). Initial schema **applied and verified**: 9 public tables, 19 public indexes and 4 foreign keys at baseline.
+- Vercel preview `DATABASE_URL` points to the **preview branch**, encrypted.
+- Region: Neon `aws-us-west-2`. Consider data residency and latency before accepting real users.
 
-## Tables
-`conversations`: UUID primary key, Better Auth user ID, title, created/updated timestamps. Owner/recency index.
+## Source of truth
 
-`messages`: UUID primary key, owning conversation cascade foreign key, request UUID and role uniqueness to support retry idempotency, content, status (`pending`/`complete`/`interrupted`/`failed`), AI provider/model, token counts, ordered index.
+- `src/db/auth-schema.ts` provides Better Auth tables.
+- `src/db/schema.ts` provides conversations, messages, settings, usage events and atomic daily quota reservations.
+- `db/migrations/0001_mechat_initial.sql` is the versioned initial schema SQL **for review**. It is not automatically executed in CI or during Vercel build.
+- `drizzle.config.ts` can generate future Drizzle migrations, but there is not yet a fully baselined Drizzle migration journal.
 
-`user_settings`: Better Auth user ID primary key, light/dark/system theme and response style.
+## Safe database release
 
-`usage_events`: model/provider request log, owner, token counts, cost estimate in integer micro-USD, unique request UUID. Usage survives conversation deletion, with nullable conversation pointer.
+1. Verify the versioned SQL against the TypeScript schema and current Better Auth release.
+2. Test expected login/signup/OTP and conversation CRUD on the **isolated Neon preview branch**.
+3. Have the user explicitly approve any change to the production/main branch.
+4. Apply the reviewed SQL once to production only after approval and scheduled backup/rollback plan.
+5. Establish a matching Drizzle migration journal/baseline before using `drizzle-kit migrate`. Do **not** run `db:generate` and blindly migrate the existing initial schema again.
+6. Update the production server-side `DATABASE_URL` and complete end-to-end testing.
 
-**Important:** Better Auth will generate/manage its own user/account/session/verification schema in the authentication milestone. We deliberately do not generate duplicate versions of its tables. Application user IDs are text and owner checks must be enforced by the server; future migrations can add explicit foreign keys to the finalized Better Auth user schema.
+## Data model
 
-## Safe migration workflow
-1. Configure `DATABASE_URL` privately (Neon connection string; server-only).
-2. Run `npm install` to resolve dependencies and commit the resulting `package-lock.json`.
-3. Run `npm run db:generate` to create migration SQL and review it in a pull request.
-4. Exercise the migration on a **separate Neon development branch**.
-5. Have the user explicitly approve applying the reviewed schema to the intended Neon main branch before running migrations.
-6. Only then set environment variables and enable database routes.
+Better Auth: `user`, `account`, `session`, `verification`.
+MeChat: `conversations` (per-user ownership), `messages` (cascade deleted on conversation deletion), `user_settings`, `usage_events`, `ai_daily_quotas` (atomic daily request budget).
 
-## Security invariants
-- Session + per-conversation ownership checks on every read, mutation and stream.
-- Never trust `userId` submitted by the browser; derive it from the validated server session.
-- Bounded pagination and token/cost quotas.
-- Use DB transactions or explicit failure states for interrupted model streams.
-- Protect sensitive data from logs and never expose DATABASE_URL to client code.
+Messages have a unique (`conversation_id`, `request_id`, `role`) index to support idempotent writes, and statuses `pending`, `complete`, `failed`, `interrupted`. Conversation and usage records are indexed by user ID.
 
-**Status:** Schema code only; no migrations applied and no live DB access from the web UI.
+**Important:** A passing schema check is not a complete security test. Verify per-user isolation with two separate test accounts before production.
