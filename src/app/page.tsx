@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowRight, ArrowUpRight, AudioLines, Bell, BookOpenText, BriefcaseBusiness, Code2, HeartPulse, Image as ImageIcon, MessageCircleMore, Moon, Sparkles, Sun, WandSparkles } from "lucide-react";
@@ -19,19 +19,26 @@ const topics: {category:Topic;title:string;description:string;prompt:string;icon
 ];
 const filters: Topic[]=["Daily life","Business","Health","Development"];
 
+function subscribeTheme(onChange:()=>void){
+ window.addEventListener("storage",onChange);
+ window.addEventListener("mechat:theme-update",onChange);
+ return ()=>{window.removeEventListener("storage",onChange);window.removeEventListener("mechat:theme-update",onChange)};
+}
+function readTheme():boolean {try{return window.localStorage.getItem("mechat:theme")==="dark"}catch{return false}}
+function readGreeting():string {const hour=new Date().getHours();return hour<12?"Good morning":hour<17?"Good afternoon":"Good evening";}
+function subscribeGreeting(onChange:()=>void){
+ const timer=window.setInterval(onChange,60_000);window.addEventListener("focus",onChange);
+ return ()=>{window.clearInterval(timer);window.removeEventListener("focus",onChange)};
+}
 export default function Home(){
  const router=useRouter();
  const [selected,setSelected]=useState<Topic>("Daily life");
- const [dark,setDark]=useState(false);
- const [greeting,setGreeting]=useState("Welcome back");
- useEffect(()=>{
-   const hour=new Date().getHours();
-   setGreeting(hour<12?"Good morning":hour<17?"Good afternoon":"Good evening");
-   try{const stored=localStorage.getItem("mechat:theme")==="dark";setDark(stored);document.documentElement.dataset.theme=stored?"dark":"light";}catch{}
- },[]);
+ const dark=useSyncExternalStore(subscribeTheme,readTheme,()=>false);
+ const greeting=useSyncExternalStore(subscribeGreeting,readGreeting,()=>"Welcome back");
+ useEffect(()=>{document.documentElement.dataset.theme=dark?"dark":"light"},[dark]);
  const visible=useMemo(()=>topics.filter(t=>t.category===selected),[selected]);
  const openPrompt=(prompt:string)=>{try{sessionStorage.setItem("mechat:pending-prompt",prompt)}catch{}router.push("/chat")};
- const toggleTheme=()=>{const next=!dark;setDark(next);document.documentElement.dataset.theme=next?"dark":"light";try{localStorage.setItem("mechat:theme",next?"dark":"light")}catch{}};
+ const toggleTheme=()=>{try{localStorage.setItem("mechat:theme",dark?"light":"dark");window.dispatchEvent(new Event("mechat:theme-update"))}catch{}};
  return <div className="mc-page"><div className="ambient-bg" aria-hidden="true"/>
   <header className="site-header page-width"><Brand/><nav className="desktop-nav" aria-label="Primary"><Link className="current" href="/">Home</Link><Link href="/chat">Smart Chat</Link><Link href="/voice">Voice Analysis</Link></nav><div className="header-actions"><span className="preview-tag">EARLY PREVIEW</span><button className="round-icon" onClick={toggleTheme} aria-label="Toggle theme">{dark?<Sun size={18}/>:<Moon size={18}/>}</button><Link href="/sign-in" className="user-avatar" aria-label="Account">M</Link></div></header>
   <main className="page-width home-main">
@@ -51,6 +58,6 @@ export default function Home(){
       </div>
       <aside className="feature-card"><span className="feature-eyebrow"><Sparkles size={15}/> MEET YOUR AI SPACE</span><div className="orb-stage" aria-hidden="true"><div className="orb"/><div className="orb-glow"/></div><div className="feature-text"><span className="eyebrow">CREATE. LEARN. EXPLORE.</span><h2>Every great idea starts with <em>a question.</em></h2><p>Let curiosity lead you. Bring your thoughts, your projects, and your wildest what-ifs.</p><Link href="/chat">Explore smart chat <span><ArrowUpRight size={18}/></span></Link></div><span className="feature-footer">THE FUTURE IS A CONVERSATION AWAY</span></aside>
     </div>
-    <div className="home-banner"><span className="banner-icon"><Bell size={18}/></span><div><strong>Something wonderful is taking shape.</strong><p>You're viewing MeChat's first experience preview. Live AI arrives in the next development phase.</p></div><Link href="/chat">Try the preview <ArrowRight size={18}/></Link></div>
+    <div className="home-banner"><span className="banner-icon"><Bell size={18}/></span><div><strong>Something wonderful is taking shape.</strong><p>You&apos;re viewing MeChat&apos;s first experience preview. Live AI arrives in the next development phase.</p></div><Link href="/chat">Try the preview <ArrowRight size={18}/></Link></div>
   </main><BottomNav active="home"/></div>;
 }
