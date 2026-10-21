@@ -9,22 +9,17 @@ import { MeChatLogo, MeChatSymbol } from "@/components/logo";
 
 type StoredThread={id:string;title:string;updatedAt:string};
 type Role="user"|"assistant";
-type Message={id:string;role:Role;content:string;status?:"pending"|"complete"|"interrupted"|"failed"};
-type ProviderAvailability="checking"|"available"|"insufficient-balance"|"invalid-api-key"|"rate-limited"|"unavailable"|"unknown";
-async function fetchProviderAvailability():Promise<ProviderAvailability>{
- try{
-   const response=await fetch("/api/health",{credentials:"same-origin",cache:"no-store"});
-   const value:unknown=await response.json();
-   if(!isRecord(value) || typeof value.provider!=="string")return "unknown";
-   if(value.provider==="available")return "available";
-   if(value.provider==="insufficient-balance")return "insufficient-balance";
-   if(value.provider==="invalid-api-key")return "invalid-api-key";
-   if(value.provider==="rate-limited")return "rate-limited";
-   if(value.provider==="provider-unavailable"||value.provider==="not-configured")return "unavailable";
-   return "unknown";
- }catch{return "unknown"}
+type Message={id:string;role:Role;content:string;status?:"pending"|"complete"|"interrupted"|"failed";provider?:string|null;modelId?:string|null};
+type ModelChoice="groq"|"gemini"|"openrouter"|"deepseek"|"auto";
+type ProviderOption={id:Exclude<ModelChoice,"auto">;label:string;modelId:string;description:string;configured:boolean;selectable:boolean;status:string;freeTier:boolean};
+type ProviderDirectory={options:ProviderOption[];defaultProvider:Exclude<ModelChoice,"auto">|null;autoEnabled:boolean;autoDisclosure:string};
+async function fetchProviderDirectory():Promise<ProviderDirectory>{
+ const response=await fetch("/api/providers",{credentials:"same-origin",cache:"no-store"});
+ if(!response.ok)throw new Error("Unable to load available AI models.");
+ const body:unknown=await response.json();
+ if(!isRecord(body)||!Array.isArray(body.options))throw new Error("Invalid provider list.");
+ return body as ProviderDirectory;
 }
-
 const starterIdeas=[
  {title:"Write and refine",text:"Help me draft a professional email that is clear, concise and friendly."},
  {title:"Learn something",text:"Explain the fundamentals of machine learning with useful examples."},
@@ -73,7 +68,10 @@ export function ChatWorkspace({user,initialConversationId=null}:{user:{name:stri
  const [lastError,setLastError]=useState("");
  const [modelInfo,setModelInfo]=useState(false);
  const [conversationsLoading,setConversationsLoading]=useState(true);
- const [providerStatus,setProviderStatus]=useState<ProviderAvailability>("checking");
+ const [providerDirectory,setProviderDirectory]=useState<ProviderDirectory|null>(null);
+ const [selectedProvider,setSelectedProvider]=useState<ModelChoice|null>(null);
+ const [providerBusy,setProviderBusy]=useState(true);
+ const [providerFault,setProviderFault]=useState("");
  const dark=useSyncExternalStore(subscribeTheme,readTheme,()=>false);
  const end=useRef<HTMLDivElement>(null);
  const composer=useRef<HTMLTextAreaElement>(null);
@@ -82,31 +80,49 @@ export function ChatWorkspace({user,initialConversationId=null}:{user:{name:stri
  const groups=["Today","Yesterday","Previous 7 days","Older"];
  useEffect(()=>{document.documentElement.dataset.theme=dark?"dark":"light"},[dark]);
  useEffect(()=>{
-   let active=true;
-   void fetchProviderAvailability().then(status=>{if(active)setProviderStatus(status)});
-   return ()=>{active=false};
+  let mounted=true;
+  void fetchProviderDirectory().then(directory=>{
+   if(!mounted)return;
+   setProviderDirectory(directory);
+   let saved:string|null=null;
+   try{saved=localStorage.getItem("mechat:selected-provider")}catch{}
+   const allowed=(saved==="auto"&&directory.autoEnabled)||directory.options.some(p=>p.id===saved&&p.selectable);
+   setSelectedProvider(allowed?saved as ModelChoice:directory.defaultProvider);
+  }).catch(()=>{if(mounted)setProviderFault("Unable to load AI models.")})
+   .finally(()=>{if(mounted)setProviderBusy(false)});
+  return ()=>{mounted=false};
  },[]);
  const refreshProvider=()=>{
-   setProviderStatus("checking");
-   void fetchProviderAvailability().then(setProviderStatus);
+  setProviderBusy(true);setProviderFault("");
+  void fetchProviderDirectory().then(directory=>{
+   setProviderDirectory(directory);
+   setSelectedProvider(current=>{
+    const allowed=(current==="auto"&&directory.autoEnabled)||directory.options.some(p=>p.id===current&&p.selectable);
+    return allowed?current:directory.defaultProvider;
+   });
+  }).catch(()=>setProviderFault("Unable to refresh AI models."))
+   .finally(()=>setProviderBusy(false));
  };
- const chatAvailable=providerStatus==="available"||providerStatus==="unknown";
- const statusNotice=providerStatus==="insufficient-balance"
-   ?"AI replies are paused while DeepSeek usage credits are unavailable. You can still read your conversations."
-   :providerStatus==="invalid-api-key"
-     ?"AI replies are paused while the connection is being configured. Previous conversations remain available."
-     :providerStatus==="rate-limited"
-       ?"The AI service is temporarily rate-limited. Your conversations remain available."
-       :providerStatus==="unavailable"
-         ?"The AI service is temporarily unavailable. You can still read your conversations."
-         :null;
+ const changeProvider=(value:ModelChoice)=>{
+  if(busy)return;
+  if(value==="auto"&&!providerDirectory?.autoEnabled)return;
+  if(value!=="auto"&&!providerDirectory?.options.some(p=>p.id===value&&p.selectable))return;
+  setSelectedProvider(value);setProviderFault("");setModelInfo(false);
+  try{localStorage.setItem("mechat:selected-provider",value)}catch{}
+ };
+ const selectedOption=providerDirectory?.options.find(p=>p.id===selectedProvider);
+ const selectedLabel=selectedProvider==="auto"?"Auto · free models":selectedOption?.label??"Choose a model";
+ const chatAvailable=!providerBusy&&!providerFault&&Boolean(selectedProvider)&&
+  (selectedProvider==="auto"?Boolean(providerDirectory?.autoEnabled):Boolean(selectedOption?.selectable));
+ const statusNotice=providerFault||(!providerBusy&&!chatAvailable
+  ?"No usable AI model is currently selected. Check the configured API keys.":null);
  useEffect(()=>{let ignore=false;apiJson("/api/conversations").then(data=>{if(ignore)return;const obj=data as {conversations?:StoredThread[]};setThreads(obj.conversations??[])}).catch(()=>{if(!ignore)setLoadError("Unable to load your conversations.")}).finally(()=>{if(!ignore)setConversationsLoading(false)});return()=>{ignore=true}},[]);
  useEffect(()=>{
   if(!activeId)return;
   let ignore=false;
   apiJson("/api/conversations/"+encodeURIComponent(activeId)).then(data=>{
    if(ignore)return;
-   const obj=data as {messages?:Message[]};setMessages((obj.messages??[]).map(m=>({id:m.id,role:m.role,content:m.content,status:m.status})));
+   const obj=data as {messages?:Message[]};setMessages((obj.messages??[]).map(m=>({id:m.id,role:m.role,content:m.content,status:m.status,provider:m.provider,modelId:m.modelId})));
    setLoadingMessages(false);
   }).catch(()=>{if(!ignore){setLoadingMessages(false);setLoadError("Unable to open conversation.")}});
   return()=>{ignore=true};
@@ -154,16 +170,12 @@ export function ChatWorkspace({user,initialConversationId=null}:{user:{name:stri
    try{
      const res=await fetch("/api/chat",{
        method:"POST",headers:{"Content-Type":"application/json"},
-       body:JSON.stringify({conversationId:activeId,content,requestId}),
+       body:JSON.stringify({conversationId:activeId,content,requestId,provider:selectedProvider}),
        signal:control.signal,
      });
      if(!res.ok){
        const data:unknown=await res.json().catch(()=>({}));
-       if(isRecord(data)&&typeof data.reason==="string"){
-         if(data.reason==="insufficient-balance")setProviderStatus("insufficient-balance");
-         else if(data.reason==="invalid-api-key")setProviderStatus("invalid-api-key");
-         else if(data.reason==="rate-limited")setProviderStatus("rate-limited");
-       }
+       if(isRecord(data)&&data.reason==="provider-not-configured")refreshProvider();
        if(isRecord(data)&&typeof data.conversationId==="string")savedConversationId=data.conversationId;
        throw new Error(resultError(data,"Unable to reach the AI service."));
      }
@@ -179,6 +191,11 @@ export function ChatWorkspace({user,initialConversationId=null}:{user:{name:stri
          const parsed=parseStream(frame);if(!parsed)continue;
          if(parsed.event==="meta"&&typeof parsed.payload.conversationId==="string"){
            savedConversationId=parsed.payload.conversationId;
+           if(typeof parsed.payload.provider==="string"){
+             const provider=parsed.payload.provider;
+             const modelId=typeof parsed.payload.modelId==="string"?parsed.payload.modelId:null;
+             setMessages(old=>old.map(m=>m.id===replyId?{...m,provider,modelId}:m));
+           }
          }
          if(parsed.event==="delta"&&typeof parsed.payload.text==="string"){
            setMessages(old=>old.map(m=>m.id===replyId?{...m,content:m.content+String(parsed.payload.text)}:m));
@@ -257,8 +274,22 @@ export function ChatWorkspace({user,initialConversationId=null}:{user:{name:stri
       <div className="topbar-left">
         <button className="icon-button mobile-menu" aria-label="Open sidebar" onClick={()=>setSidebarOpen(true)}><Menu size={21}/></button>
         {collapsed&&<button className="icon-button desktop-sidebar-open" aria-label="Expand sidebar" onClick={()=>setCollapsed(false)}><PanelLeftOpen size={19}/></button>}
-        <button className="model-switch" onClick={()=>setModelInfo(!modelInfo)} aria-expanded={modelInfo}>MeChat <ChevronDown size={16}/></button>
-        {modelInfo&&<div className="model-popover"><strong>MeChat Assistant</strong><p>Powered by DeepSeek Flash. Additional models will be introduced after evaluation.</p><div className="model-active"><span/> DeepSeek Flash <Check size={16}/></div></div>}
+        <button className="model-switch" onClick={()=>setModelInfo(!modelInfo)} aria-expanded={modelInfo} aria-label="Choose AI model">{selectedLabel} <ChevronDown size={16}/></button>
+        {modelInfo&&<div className="model-popover" role="group" aria-label="Available AI models">
+         <strong>Choose an AI model</strong>
+         <p>Free tiers have individual usage limits. Select a provider to control where each message is sent.</p>
+         <div className="model-options">
+          {providerDirectory?.autoEnabled&&<button type="button" disabled={busy} onClick={()=>changeProvider("auto")} className={selectedProvider==="auto"?"model-choice active":"model-choice"}>
+            <span><strong>Auto · free models</strong><small>Groq → Gemini → OpenRouter, with your consent</small></span>{selectedProvider==="auto"&&<Check size={16}/>}
+          </button>}
+          {providerDirectory?.options.map(option=><button key={option.id} type="button" disabled={busy||!option.selectable}
+             onClick={()=>changeProvider(option.id)} className={selectedProvider===option.id?"model-choice active":"model-choice"}>
+             <span><strong>{option.label}</strong><small>{option.selectable?option.description:option.status==="insufficient-balance"?"No API credits available":"Not configured or unavailable"}</small></span>
+             {selectedProvider===option.id&&<Check size={16}/>}
+          </button>)}
+         </div>
+         {selectedProvider==="auto"&&<p className="model-privacy">{providerDirectory?.autoDisclosure}</p>}
+        </div>}
       </div>
       <div className="topbar-right"><span className="private-pill"><ShieldCheck size={14}/> Private workspace</span><button className="icon-button" title="Appearance" aria-label="Toggle appearance" onClick={()=>setTheme(!dark)}>{dark?<Sun size={19}/>:<Moon size={19}/>}</button><span className="topbar-avatar" title={user.name}>{initials}</span></div>
     </header>
@@ -270,7 +301,7 @@ export function ChatWorkspace({user,initialConversationId=null}:{user:{name:stri
         <div className="prompt-grid">{starterIdeas.map(idea=><button key={idea.title} onClick={()=>{setDraft(idea.text);composer.current?.focus()}}><strong>{idea.title}</strong><span>{idea.text}</span><ArrowUp size={16}/></button>)}</div>
       </div>:loadingMessages?<div className="loading-conversation">Opening conversation…</div>:<div className="messages-container" role="log" aria-label="Conversation">
          {messages.map(msg=><article className={`conversation-message ${msg.role}`} key={msg.id}>
-           {msg.role==="assistant"&&<div className="message-identity"><MeChatSymbol size={29}/><span>MeChat</span></div>}
+           {msg.role==="assistant"&&<div className="message-identity"><MeChatSymbol size={29}/><span>MeChat{msg.provider?" · "+(providerDirectory?.options.find(p=>p.id===msg.provider)?.label??msg.provider):""}</span></div>}
            {msg.role==="user"?<div className="user-message-text">{msg.content}</div>:<div className="message-content">
              {msg.status==="pending"&&!msg.content?<div className="thinking-dots"><i/><i/><i/><span>Thinking</span></div>:<ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>}
              {(msg.status==="interrupted"||msg.status==="failed")&&<p className="message-error">This response could not be completed. Please try again.</p>}
@@ -289,9 +320,9 @@ export function ChatWorkspace({user,initialConversationId=null}:{user:{name:stri
       {lastError&&<div className="composer-error"><CircleHelp size={16}/><span>{lastError}</span><button aria-label="Dismiss message" onClick={()=>setLastError("")}><X size={15}/></button></div>}
       <form className="chat-composer" onSubmit={onSubmit}>
         <textarea ref={composer} rows={2} maxLength={8000} placeholder="Message MeChat" aria-label="Message MeChat" value={draft} onChange={e=>setDraft(e.target.value)} onKeyDown={onComposerKey} disabled={busy}/>
-        <div className="composer-bottom"><div className="composer-left"><button title="Attachments coming soon" aria-label="Attachments not yet available" disabled type="button" className="icon-button"><Plus size={19}/></button><span className="model-label"><Sparkles size={15}/> DeepSeek Flash</span></div><div className="composer-actions"><span className="composer-count">{draft.length?draft.length+"/8000":""}</span>{busy?<button className="send-control is-busy" type="button" aria-label="Stop response" onClick={()=>abort.current?.abort()}><span className="stop-square"/></button>:<button className="send-control" type="submit" aria-label="Send message" disabled={!draft.trim()||!chatAvailable}><ArrowUp size={20}/></button>}</div></div>
+        <div className="composer-bottom"><div className="composer-left"><button title="Attachments coming soon" aria-label="Attachments not yet available" disabled type="button" className="icon-button"><Plus size={19}/></button><span className="model-label"><Sparkles size={15}/> {selectedLabel}</span></div><div className="composer-actions"><span className="composer-count">{draft.length?draft.length+"/8000":""}</span>{busy?<button className="send-control is-busy" type="button" aria-label="Stop response" onClick={()=>abort.current?.abort()}><span className="stop-square"/></button>:<button className="send-control" type="submit" aria-label="Send message" disabled={!draft.trim()||!chatAvailable}><ArrowUp size={20}/></button>}</div></div>
       </form>
-      <p className="composer-disclaimer">{providerStatus==="checking"?"Checking AI service availability…":statusNotice?"Messaging will resume when the AI service is available.":"MeChat can make mistakes. Verify important information."}</p>
+      <p className="composer-disclaimer">{providerBusy?"Checking AI models…":selectedProvider==="gemini"?"Google free-tier data-use terms apply. Verify important answers.":selectedProvider==="auto"?"Auto may send prompts to several providers. Verify important answers.":"MeChat can make mistakes. Verify important information."}</p>
     </div>
    </main>
    {settingsOpen&&<div className="modal-overlay" role="presentation" onClick={()=>setSettingsOpen(false)}><section role="dialog" aria-modal="true" aria-label="Settings" className="modal-card settings-card" onClick={e=>e.stopPropagation()}><header><div><h2>Settings</h2><p>Customize your space</p></div><button className="icon-button" aria-label="Close settings" onClick={()=>setSettingsOpen(false)}><X size={20}/></button></header><div className="settings-row"><div><strong>Appearance</strong><p>Choose a comfortable reading environment.</p></div><div className="theme-buttons"><button className={!dark?"active":""} onClick={()=>setTheme(false)}><Sun size={16}/> Light</button><button className={dark?"active":""} onClick={()=>setTheme(true)}><Moon size={16}/> Dark</button></div></div><div className="settings-row"><div><strong>Your account</strong><p>{user.email}</p></div><UserRound size={20}/></div><div className="settings-footer"><FileText size={16}/> Your conversations are stored securely and available on sign-in.</div></section></div>}
