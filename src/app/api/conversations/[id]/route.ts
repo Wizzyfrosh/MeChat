@@ -2,6 +2,7 @@ import { and, asc, desc, eq } from "drizzle-orm";
 import { conversations, messages } from "@/db/schema";
 import { getDatabase } from "@/db/client";
 import { getUserSession } from "@/lib/session";
+import {recentMessageOrder} from "@/lib/message-order";
 export const runtime="nodejs";
 type Ctx={params:Promise<{id:string}>};
 const isUuid=(s:string)=>/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(s);
@@ -18,7 +19,7 @@ export async function GET(_req:Request,ctx:Ctx){
   const db=getDatabase();
   const [row]=await db.select().from(conversations).where(and(eq(conversations.id,id),eq(conversations.userId,session.user.id))).limit(1);
   if(!row)return Response.json({error:"Conversation not found"},{status:404});
-  const content=(await db.select({id:messages.id,role:messages.role,content:messages.content,status:messages.status,createdAt:messages.createdAt,provider:messages.provider,modelId:messages.modelId}).from(messages).where(eq(messages.conversationId,id)).orderBy(desc(messages.createdAt),desc(messages.requestId),desc(messages.role)).limit(250)).reverse();
+  const content=(await db.select({id:messages.id,role:messages.role,content:messages.content,status:messages.status,createdAt:messages.createdAt,provider:messages.provider,modelId:messages.modelId}).from(messages).where(eq(messages.conversationId,id)).orderBy(...recentMessageOrder).limit(250)).reverse();
   return Response.json({conversation:row,messages:content},{headers:{"Cache-Control":"no-store"}});
  }catch{return Response.json({error:"Unable to load conversation"},{status:503})}
 }
