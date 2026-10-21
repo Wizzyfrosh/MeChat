@@ -1,4 +1,4 @@
-import { and, asc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 import { aiDailyQuotas, conversations, messages, usageEvents } from "@/db/schema";
 import { getDatabase } from "@/db/client";
 import { getUserSession } from "@/lib/session";
@@ -45,8 +45,8 @@ export async function POST(req:Request){
   }
   const existing=await db.select({id:messages.id}).from(messages).where(and(eq(messages.conversationId,id!),eq(messages.requestId,requestId))).limit(1);
   if(existing.length)return Response.json({error:"This message has already been submitted."},{status:409});
-  const all=await db.select({role:messages.role,content:messages.content,status:messages.status}).from(messages).where(eq(messages.conversationId,id!)).orderBy(asc(messages.createdAt)).limit(220);
-  const history=all.filter(m=>m.status==="complete"&&m.content).slice(-16).map(m=>({role:m.role,content:m.content}));
+  const all=await db.select({role:messages.role,content:messages.content,status:messages.status}).from(messages).where(eq(messages.conversationId,id!)).orderBy(desc(messages.createdAt),desc(messages.id)).limit(16);
+  const history=all.reverse().filter(m=>m.status==="complete"&&m.content).map(m=>({role:m.role,content:m.content}));
   await db.insert(messages).values([{conversationId:id!,requestId,role:"user",content,status:"complete"},{conversationId:id!,requestId,role:"assistant",content:"",status:"pending",provider:"deepseek",modelId:"deepseek-flash"}]);
   await db.insert(usageEvents).values({userId:uid,conversationId:id!,requestId,provider:"deepseek",modelId:"deepseek-flash",inputTokens:0,outputTokens:0});
   await db.update(conversations).set({updatedAt:new Date()}).where(eq(conversations.id,id!));
