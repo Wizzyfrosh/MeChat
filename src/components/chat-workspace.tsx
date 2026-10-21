@@ -58,6 +58,12 @@ export function ChatWorkspace({user,initialConversationId=null}:{user:{name:stri
  const [collapsed,setCollapsed]=useState(false);
  const [searchOpen,setSearchOpen]=useState(false);
  const [search,setSearch]=useState("");
+ const [debouncedSearch,setDebouncedSearch]=useState("");
+ const [historyCursor,setHistoryCursor]=useState<string|null>(null);
+ const [loadingMore,setLoadingMore]=useState(false);
+ const [confirmClear,setConfirmClear]=useState(false);
+ const [clearPhrase,setClearPhrase]=useState("");
+ const [clearingHistory,setClearingHistory]=useState(false);
  const [menuOpen,setMenuOpen]=useState(false);
  const [settingsOpen,setSettingsOpen]=useState(false);
  const [actionsFor,setActionsFor]=useState<string|null>(null);
@@ -78,6 +84,7 @@ export function ChatWorkspace({user,initialConversationId=null}:{user:{name:stri
  const shouldFollow=useRef(true);
  const composer=useRef<HTMLTextAreaElement>(null);
  const searchRef=useRef<HTMLInputElement>(null);
+ const historyQueryRef=useRef("");
  const abort=useRef<AbortController|null>(null);
  const groups=["Today","Yesterday","Previous 7 days","Older"];
  useEffect(()=>{document.documentElement.dataset.theme=dark?"dark":"light"},[dark]);
@@ -118,7 +125,41 @@ export function ChatWorkspace({user,initialConversationId=null}:{user:{name:stri
   (selectedProvider==="auto"?Boolean(providerDirectory?.autoEnabled):Boolean(selectedOption?.selectable));
  const statusNotice=providerFault||(!providerBusy&&!chatAvailable
   ?"No usable AI model is currently selected. Check the configured API keys.":null);
- useEffect(()=>{let ignore=false;apiJson("/api/conversations").then(data=>{if(ignore)return;const obj=data as {conversations?:StoredThread[]};setThreads(obj.conversations??[])}).catch(()=>{if(!ignore)setLoadError("Unable to load your conversations.")}).finally(()=>{if(!ignore)setConversationsLoading(false)});return()=>{ignore=true}},[]);
+ useEffect(()=>{const timer=setTimeout(()=>setDebouncedSearch(search.trim()),300);return()=>clearTimeout(timer)},[search]);
+ useEffect(()=>{
+  historyQueryRef.current=debouncedSearch;
+  let stale=false;
+  const control=new AbortController();
+  setConversationsLoading(true);
+  setThreads([]);
+  setHistoryCursor(null);
+  setLoadError("");
+  const url="/api/conversations?limit=25&q="+encodeURIComponent(debouncedSearch);
+  apiJson(url,{signal:control.signal}).then(data=>{
+   if(stale)return;
+   const result=data as {conversations:StoredThread[];nextCursor:string|null};
+   setThreads(result.conversations??[]);
+   setHistoryCursor(result.nextCursor??null);
+  }).catch(()=>{if(!stale)setLoadError("Unable to load or search conversation history.")})
+   .finally(()=>{if(!stale)setConversationsLoading(false)});
+  return ()=>{stale=true;control.abort()};
+ },[debouncedSearch]);
+ async function loadMoreHistory(){
+  if(!historyCursor||loadingMore||conversationsLoading)return;
+  const query=historyQueryRef.current;
+  setLoadingMore(true);
+  try{
+   const url="/api/conversations?limit=25&q="+encodeURIComponent(query)+"&cursor="+encodeURIComponent(historyCursor);
+   const result=await apiJson(url) as {conversations:StoredThread[];nextCursor:string|null};
+   if(query!==historyQueryRef.current)return;
+   setThreads(prev=>{
+    const found=new Set(prev.map(t=>t.id));
+    return [...prev,...(result.conversations??[]).filter(t=>!found.has(t.id))];
+   });
+   setHistoryCursor(result.nextCursor??null);
+  }catch{if(query===historyQueryRef.current)setLoadError("Unable to load older conversations.")}
+  finally{setLoadingMore(false)}
+ }
  useEffect(()=>{
   if(!activeId)return;
   let ignore=false;
@@ -145,7 +186,37 @@ export function ChatWorkspace({user,initialConversationId=null}:{user:{name:stri
   if((e.metaKey||e.ctrlKey)&&e.shiftKey&&e.key.toLowerCase()==="o"){e.preventDefault();startNew()}
  };window.addEventListener("keydown",handler);return()=>window.removeEventListener("keydown",handler)});
  const setTheme=(next:boolean)=>{localStorage.setItem("mechat.theme",next?"dark":"light");window.dispatchEvent(new Event("mechat-theme"))};
- const reloadList=async()=>{try{const data=await apiJson("/api/conversations") as {conversations:StoredThread[]};setThreads(data.conversations)}catch{}};
+ const reloadList=async()=>{
+  const query=historyQueryRef.current;
+  try{
+   const data=await apiJson("/api/conversations?limit=25&q="+encodeURIComponent(query)) as {conversations:StoredThread[];nextCursor:string|null};
+   if(query!==historyQueryRef.current)return;
+   setThreads(data.conversations??[]);
+   setHistoryCursor(data.nextCursor??null);
+  }catch{setLoadError("Could not refresh conversation history.")}
+ };
+ function downloadHistory(url:string){
+  const a=document.createElement("a");
+  a.href=url;
+  a.rel="nofollow";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+ }
+ async function clearAllHistory(){
+  if(clearPhrase!=="DELETE ALL CHATS"||clearingHistory)return;
+  setClearingHistory(true);
+  try{
+   await apiJson("/api/data/conversations",{
+    method:"DELETE",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({confirmation:clearPhrase})
+   });
+   setThreads([]);setHistoryCursor(null);setMessages([]);
+   setActiveId(null);setConfirmClear(false);setSettingsOpen(false);setClearPhrase("");
+   setSearch("");router.replace("/chat");await reloadList();
+  }catch(e){setLoadError(e instanceof Error?e.message:"Could not clear your chat history.")}
+  finally{setClearingHistory(false)}
+ }
  function startNew(){if(busy)return;shouldFollow.current=true;setActiveId(null);setMessages([]);setDraft("");setLastError("");setLoadingMessages(false);setSidebarOpen(false);setActionsFor(null);router.push("/chat");requestAnimationFrame(()=>composer.current?.focus())}
  function openThread(id:string){if(busy)return;shouldFollow.current=true;setLastError("");setSidebarOpen(false);setActionsFor(null);setLoadingMessages(true);setActiveId(id);router.push("/chat/"+encodeURIComponent(id))}
  async function rename(id:string){
@@ -249,7 +320,7 @@ export function ChatWorkspace({user,initialConversationId=null}:{user:{name:stri
  }
  function onSubmit(e:FormEvent){e.preventDefault();void sendText(draft)}
  function onComposerKey(e:KeyboardEvent<HTMLTextAreaElement>){if(e.key==="Enter"&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();void sendText(draft)}}
- const shown=threads.filter(t=>t.title.toLowerCase().includes(search.trim().toLowerCase()));
+ const shown=threads;
  const initials=user.name.trim().split(/\s+/).slice(0,2).map(s=>s[0]?.toUpperCase()).join("")||"U";
  return <div className="chat-app-shell">
    {sidebarOpen&&<button className="drawer-backdrop" aria-label="Close navigation" onClick={()=>setSidebarOpen(false)}/>}
@@ -271,9 +342,10 @@ export function ChatWorkspace({user,initialConversationId=null}:{user:{name:stri
        return entries.length?<div className="history-group" key={group}><div className="history-heading">{group}</div>{entries.map(t=><div className={`history-item ${activeId===t.id?"selected":""}`} key={t.id}>
         {renaming===t.id?<form className="rename-form" onSubmit={e=>{e.preventDefault();void rename(t.id)}}><input autoFocus maxLength={160} aria-label="Conversation title" value={titleDraft} onChange={e=>setTitleDraft(e.target.value)}/><button type="submit" aria-label="Save title"><Check size={16}/></button></form>:<button className="history-open" onClick={()=>openThread(t.id)} title={t.title}><MessageCircle size={16}/><span>{t.title}</span></button>}
         <button className="history-more" aria-label={`Actions for ${t.title}`} onClick={()=>setActionsFor(actionsFor===t.id?null:t.id)}><Ellipsis size={17}/></button>
-        {actionsFor===t.id&&<div className="thread-actions"><button onClick={()=>{setRenaming(t.id);setTitleDraft(t.title);setActionsFor(null)}}><Pencil size={15}/> Rename</button><button className="danger" onClick={()=>{setRemoveTarget(t.id);setActionsFor(null)}}><Trash2 size={15}/> Delete</button></div>}
+        {actionsFor===t.id&&<div className="thread-actions"><button onClick={()=>{setRenaming(t.id);setTitleDraft(t.title);setActionsFor(null)}}><Pencil size={15}/> Rename</button><button onClick={()=>{downloadHistory("/api/conversations/"+encodeURIComponent(t.id)+"/export?format=markdown");setActionsFor(null)}}><FileText size={15}/> Export Markdown</button><button onClick={()=>{downloadHistory("/api/conversations/"+encodeURIComponent(t.id)+"/export?format=json");setActionsFor(null)}}><FileText size={15}/> Export JSON</button><button className="danger" onClick={()=>{setRemoveTarget(t.id);setActionsFor(null)}}><Trash2 size={15}/> Delete</button></div>}
        </div>)}</div>:null;
       })}
+      {!conversationsLoading&&historyCursor&&<button type="button" className="history-load-more" onClick={()=>void loadMoreHistory()} disabled={loadingMore}>{loadingMore?"Loading…":"Load older conversations"}</button>}
     </div>
     <div className="sidebar-bottom">
       <button className="account-control" onClick={()=>setMenuOpen(!menuOpen)} aria-expanded={menuOpen}>
@@ -341,7 +413,10 @@ export function ChatWorkspace({user,initialConversationId=null}:{user:{name:stri
       <p className="composer-disclaimer">{providerBusy?"Checking AI models…":selectedProvider==="gemini"?"Google free-tier data-use terms apply. Verify important answers.":selectedProvider==="auto"?"Auto may send prompts to several providers. Verify important answers.":"MeChat can make mistakes. Verify important information."}</p>
     </div>
    </main>
-   {settingsOpen&&<div className="modal-overlay" role="presentation" onClick={()=>setSettingsOpen(false)}><section role="dialog" aria-modal="true" aria-label="Settings" className="modal-card settings-card" onClick={e=>e.stopPropagation()}><header><div><h2>Settings</h2><p>Customize your space</p></div><button className="icon-button" aria-label="Close settings" onClick={()=>setSettingsOpen(false)}><X size={20}/></button></header><div className="settings-row"><div><strong>Appearance</strong><p>Choose a comfortable reading environment.</p></div><div className="theme-buttons"><button className={!dark?"active":""} onClick={()=>setTheme(false)}><Sun size={16}/> Light</button><button className={dark?"active":""} onClick={()=>setTheme(true)}><Moon size={16}/> Dark</button></div></div><div className="settings-row"><div><strong>Your account</strong><p>{user.email}</p></div><UserRound size={20}/></div><div className="settings-footer"><FileText size={16}/> Your conversations are saved to your account. Your selected AI provider processes the messages you send.</div></section></div>}
+   {settingsOpen&&<div className="modal-overlay" role="presentation" onClick={()=>setSettingsOpen(false)}><section role="dialog" aria-modal="true" aria-label="Settings" className="modal-card settings-card" onClick={e=>e.stopPropagation()}><header><div><h2>Settings</h2><p>Customize your space</p></div><button className="icon-button" aria-label="Close settings" onClick={()=>setSettingsOpen(false)}><X size={20}/></button></header><div className="settings-row"><div><strong>Appearance</strong><p>Choose a comfortable reading environment.</p></div><div className="theme-buttons"><button className={!dark?"active":""} onClick={()=>setTheme(false)}><Sun size={16}/> Light</button><button className={dark?"active":""} onClick={()=>setTheme(true)}><Moon size={16}/> Dark</button></div></div><div className="settings-row"><div><strong>Your account</strong><p>{user.email}</p></div><UserRound size={20}/></div><div className="settings-row"><div><strong>Download your data</strong><p>Export every conversation and message as a JSON file.</p></div><button type="button" className="secondary-button" onClick={()=>downloadHistory("/api/data/export")}><FileText size={16}/> Export data</button></div>
+      <div className="settings-row"><div><strong>Clear conversation history</strong><p>Delete all your saved chats and messages. Your account remains active.</p></div><button type="button" className="secondary-button" onClick={()=>{setClearPhrase("");setConfirmClear(true);setSettingsOpen(false)}}><Trash2 size={16}/> Clear chats</button></div>
+      <div className="settings-footer"><FileText size={16}/> Your conversations are saved to your account. Your selected AI provider processes the messages you send.</div></section></div>}
+   {confirmClear&&<div className="modal-overlay" role="presentation" onClick={()=>{if(!clearingHistory){setConfirmClear(false);setClearPhrase("")}}}><section className="modal-card" role="alertdialog" aria-modal="true" aria-label="Delete all conversations" onClick={e=>e.stopPropagation()}><h2>Delete all conversations?</h2><p>This permanently deletes your saved conversations and their messages, but keeps your MeChat account. It cannot be undone. Export your history first if needed.</p><label htmlFor="clear-chats-confirm">Type DELETE ALL CHATS to confirm</label><input id="clear-chats-confirm" autoComplete="off" value={clearPhrase} onChange={e=>setClearPhrase(e.target.value)} placeholder="DELETE ALL CHATS" maxLength={32}/><div className="modal-actions"><button className="secondary-button" disabled={clearingHistory} onClick={()=>{setConfirmClear(false);setClearPhrase("")}}>Cancel</button><button className="danger-button" disabled={clearPhrase!=="DELETE ALL CHATS"||clearingHistory} onClick={()=>void clearAllHistory()}>{clearingHistory?"Deleting…":"Delete all chats"}</button></div></section></div>}
    {removeTarget&&<div className="modal-overlay" role="presentation" onClick={()=>setRemoveTarget(null)}><section className="modal-card" role="alertdialog" aria-modal="true" aria-label="Delete conversation" onClick={e=>e.stopPropagation()}><h2>Delete conversation?</h2><p>All messages in this conversation will be permanently deleted. This action cannot be undone.</p><div className="modal-actions"><button className="secondary-button" onClick={()=>setRemoveTarget(null)}>Cancel</button><button className="danger-button" onClick={()=>void deleteThread()}>Delete conversation</button></div></section></div>}
  </div>;
 }
