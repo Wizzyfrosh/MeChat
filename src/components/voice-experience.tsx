@@ -24,6 +24,7 @@ export function VoiceExperience(){
  useEffect(()=>{
    const w=window as typeof window & {SpeechRecognition?:RecognitionCtor;webkitSpeechRecognition?:RecognitionCtor};
    setSupported(!!(w.SpeechRecognition||w.webkitSpeechRecognition));
+   try { document.documentElement.dataset.theme = localStorage.getItem("mechat:theme")==="dark" ? "dark" : "light"; } catch {}
    return ()=>{active.current?.stop();active.current=null};
  },[]);
  const toggle=()=>{
