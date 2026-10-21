@@ -22,7 +22,10 @@
     "lucide-react": "^0.468.0",
     "drizzle-orm": "^0.44.0",
     "@neondatabase/serverless": "^1.0.0",
-    "server-only": "^0.0.1"
+    "server-only": "^0.0.1",
+    "better-auth": "^1.4.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.0",
