@@ -100,13 +100,21 @@ export async function POST(req:Request){
     }finally{
       clearTimeout(limit);
       try{
-       await db.update(messages)
-        .set({content:parser.answer,status:failed?"interrupted":"complete",inputTokens:parser.usage.prompt_tokens??null,outputTokens:parser.usage.completion_tokens??null})
-        .where(and(eq(messages.conversationId,conversationId),eq(messages.requestId,requestId),eq(messages.role,"assistant")));
+       // Record accounting first. A completed answer is committed last, so the
+       // UI never receives success before the message is durably stored.
        await db.update(usageEvents)
         .set({inputTokens:parser.usage.prompt_tokens??0,outputTokens:parser.usage.completion_tokens??0})
         .where(eq(usageEvents.requestId,requestId));
-      }catch{failed=true; /* Never report success if persistence fails. */}
+       await db.update(messages)
+        .set({content:parser.answer,status:failed?"interrupted":"complete",inputTokens:parser.usage.prompt_tokens??null,outputTokens:parser.usage.completion_tokens??null})
+        .where(and(eq(messages.conversationId,conversationId),eq(messages.requestId,requestId),eq(messages.role,"assistant")));
+      }catch{
+       failed=true;
+       try{
+        await db.update(messages).set({content:parser.answer,status:"interrupted"})
+         .where(and(eq(messages.conversationId,conversationId),eq(messages.requestId,requestId),eq(messages.role,"assistant")));
+       }catch{/* An unavailable database prevents a definitive status update. */}
+      }
       try{emit(failed?"error":"done",failed?{message:"The response was interrupted or could not be saved."}:{conversationId})}catch{}
       try{controller.close()}catch{}
     }
