@@ -112,33 +112,69 @@ export function ChatWorkspace({user,initialConversationId=null}:{user:{name:stri
    setBusy(true);setLastError("");setDraft("");
    const requestId=crypto.randomUUID(),mineId=crypto.randomUUID(),replyId=crypto.randomUUID();
    setMessages(old=>[...old,{id:mineId,role:"user",content,status:"complete"},{id:replyId,role:"assistant",content:"",status:"pending"}]);
-   const control=new AbortController();abort.current=control;let newId=activeId,ended=false;
+   const control=new AbortController();
+   abort.current=control;
+   let savedConversationId:string|null=null;
+   let ended=false;
    try{
-     const res=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({conversationId:activeId,content,requestId}),signal:control.signal});
-     if(!res.ok){const v:unknown=await res.json().catch(()=>({}));throw new Error(resultError(v,"Unable to reach the AI service."))}
+     const res=await fetch("/api/chat",{
+       method:"POST",headers:{"Content-Type":"application/json"},
+       body:JSON.stringify({conversationId:activeId,content,requestId}),
+       signal:control.signal,
+     });
+     if(!res.ok){
+       const data:unknown=await res.json().catch(()=>({}));
+       if(isRecord(data)&&typeof data.conversationId==="string")savedConversationId=data.conversationId;
+       throw new Error(resultError(data,"Unable to reach the AI service."));
+     }
      if(!res.body)throw new Error("The response stream could not be opened.");
-     const reader=res.body.getReader();let buffer="",done=false;const decoder=new TextDecoder();
+     const reader=res.body.getReader();
+     let buffer="",done=false;
+     const decoder=new TextDecoder();
      while(!done){
        const part=await reader.read();if(part.done)break;
        buffer+=decoder.decode(part.value,{stream:true});
        const frames=buffer.split("\n\n");buffer=frames.pop()??"";
        for(const frame of frames){
          const parsed=parseStream(frame);if(!parsed)continue;
-         if(parsed.event==="meta"&&typeof parsed.payload.conversationId==="string")newId=parsed.payload.conversationId;
-         if(parsed.event==="delta"&&typeof parsed.payload.text==="string")setMessages(old=>old.map(m=>m.id===replyId?{...m,content:m.content+String(parsed.payload.text)}:m));
+         if(parsed.event==="meta"&&typeof parsed.payload.conversationId==="string"){
+           savedConversationId=parsed.payload.conversationId;
+         }
+         if(parsed.event==="delta"&&typeof parsed.payload.text==="string"){
+           setMessages(old=>old.map(m=>m.id===replyId?{...m,content:m.content+String(parsed.payload.text)}:m));
+         }
          if(parsed.event==="done"){ended=true;done=true;break}
          if(parsed.event==="error")throw new Error(typeof parsed.payload.message==="string"?parsed.payload.message:"AI generation was interrupted.");
        }
      }
      if(!ended)throw new Error("The response ended unexpectedly.");
      setMessages(old=>old.map(m=>m.id===replyId?{...m,status:"complete"}:m));
-     if(newId&&!activeId){setActiveId(newId);router.replace("/chat/"+newId);await reloadList()}
-     else await reloadList();
+     if(savedConversationId&&!activeId){
+       setActiveId(savedConversationId);
+       router.replace("/chat/"+savedConversationId);
+     }
+     await reloadList();
    }catch(e){
      const message=e instanceof Error&&e.name==="AbortError"?"Generation stopped.":e instanceof Error?e.message:"Unable to send your message.";
      setLastError(message);
-     setMessages(old=>old.map(m=>m.id===replyId?{...m,status:"interrupted"}:m));
-     if(newId&&!activeId){setActiveId(newId);router.replace("/chat/"+newId);await reloadList()}
+     if(savedConversationId){
+       // The user request may have been stored even when the provider failed.
+       // Recover the server's copy rather than leave a phantom unsaved conversation.
+       setMessages(old=>old.map(m=>m.id===replyId?{...m,status:"interrupted"}:m));
+       if(!activeId){
+         setActiveId(savedConversationId);
+         router.replace("/chat/"+savedConversationId);
+       }
+       await reloadList();
+       try{
+         const data=await apiJson("/api/conversations/"+encodeURIComponent(savedConversationId)) as {messages?:Message[]};
+         if(Array.isArray(data.messages))setMessages(data.messages);
+       }catch{/* Keep the partial response visible when reconnection fails. */}
+     }else{
+       // No persistence was confirmed; restore text and remove optimistic bubbles.
+       setDraft(content);
+       setMessages(old=>old.filter(m=>m.id!==mineId&&m.id!==replyId));
+     }
    }finally{abort.current=null;setBusy(false)}
  }
  function onSubmit(e:FormEvent){e.preventDefault();void sendText(draft)}
@@ -197,7 +233,7 @@ export function ChatWorkspace({user,initialConversationId=null}:{user:{name:stri
            {msg.role==="assistant"&&<div className="message-identity"><MeChatSymbol size={29}/><span>MeChat</span></div>}
            {msg.role==="user"?<div className="user-message-text">{msg.content}</div>:<div className="message-content">
              {msg.status==="pending"&&!msg.content?<div className="thinking-dots"><i/><i/><i/><span>Thinking</span></div>:<ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>}
-             {msg.status==="interrupted"&&<p className="message-error">This response was interrupted.</p>}
+             {(msg.status==="interrupted"||msg.status==="failed")&&<p className="message-error">This response could not be completed. Please try again.</p>}
            </div>}
            {msg.content&&<div className="message-tools"><button aria-label="Copy message" title="Copy" onClick={()=>void copyText(msg.content,msg.id)}>{copied===msg.id?<Check size={15}/>:<Copy size={15}/>}<span>{copied===msg.id?"Copied":""}</span></button></div>}
          </article>)}
