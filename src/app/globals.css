@@ -237,3 +237,14 @@ h1,h2,h3,h4,p{margin-top:0}svg{flex-shrink:0}
 .modal-card>input{display:block;width:100%;padding:12px 13px;border-radius:9px;border:1px solid var(--hairline);background:var(--surface-2);color:var(--ink);font:inherit;font-size:13px;outline-offset:2px}
 .modal-card .danger-button:disabled{opacity:.45;cursor:not-allowed}
 @media (max-width:540px){.settings-row{align-items:flex-start;flex-direction:column;gap:12px}.settings-row>.secondary-button{width:100%}.modal-card{max-height:calc(100dvh - 34px);overflow-y:auto}}
+
+/* Saved account preferences: compact desktop choices, touch-friendly mobile controls. */
+.response-style-buttons{display:flex;flex-wrap:wrap;gap:5px;padding:4px;border:1px solid var(--hairline);border-radius:10px;background:var(--surface-2)}
+.response-style-buttons button{border:0;border-radius:7px;padding:9px 11px;background:transparent;color:var(--secondary);font-size:11px;font-weight:620;cursor:pointer;transition:background .15s ease,color .15s ease}
+.response-style-buttons button:hover:not(:disabled){background:var(--hover);color:var(--ink)}
+.response-style-buttons button.active{color:var(--accent);background:var(--accent-tint);font-weight:740}
+.response-style-buttons button:disabled,.theme-buttons button:disabled{opacity:.52;cursor:wait}
+.preferences-error,.preferences-status{font-size:12px;line-height:1.5;margin:8px 0;padding:9px 12px;border-radius:9px}
+.preferences-error{color:var(--danger);background:var(--surface-2);border:1px solid var(--hairline)}
+.preferences-status{color:var(--secondary)}
+@media(max-width:540px){.response-style-buttons{width:100%;justify-content:space-between}.response-style-buttons button{flex:1;padding:11px 7px}}
