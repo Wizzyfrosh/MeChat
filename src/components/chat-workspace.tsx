@@ -11,6 +11,8 @@ type StoredThread={id:string;title:string;updatedAt:string};
 type Role="user"|"assistant";
 type Message={id:string;role:Role;content:string;status?:"pending"|"complete"|"interrupted"|"failed";provider?:string|null;modelId?:string|null};
 type ModelChoice="groq"|"gemini"|"openrouter"|"deepseek"|"auto";
+type ResponseStyle="balanced"|"concise"|"detailed";
+type Preferences={theme:"light"|"dark";responseStyle:ResponseStyle};
 type ProviderOption={id:Exclude<ModelChoice,"auto">;label:string;modelId:string;description:string;configured:boolean;selectable:boolean;status:string;freeTier:boolean};
 type ProviderDirectory={options:ProviderOption[];defaultProvider:Exclude<ModelChoice,"auto">|null;autoEnabled:boolean;autoDisclosure:string};
 async function fetchProviderDirectory():Promise<ProviderDirectory>{
@@ -28,6 +30,11 @@ const starterIdeas=[
 ];
 const readTheme=()=>{try{return localStorage.getItem("mechat.theme")==="dark"}catch{return false}};
 const subscribeTheme=(cb:()=>void)=>{window.addEventListener("storage",cb);window.addEventListener("mechat-theme",cb);return ()=>{window.removeEventListener("storage",cb);window.removeEventListener("mechat-theme",cb)}};
+function applyThemeToBrowser(theme:"light"|"dark"){
+ try{localStorage.setItem("mechat.theme",theme)}catch{/* Theme is still applied to this tab. */}
+ document.documentElement.dataset.theme=theme;
+ window.dispatchEvent(new Event("mechat-theme"));
+}
 function groupName(date:string){
  const now=new Date(),target=new Date(date);
  if(!Number.isFinite(target.getTime()))return "Earlier";
@@ -66,6 +73,10 @@ export function ChatWorkspace({user,initialConversationId=null}:{user:{name:stri
  const [clearingHistory,setClearingHistory]=useState(false);
  const [menuOpen,setMenuOpen]=useState(false);
  const [settingsOpen,setSettingsOpen]=useState(false);
+ const [responseStyle,setResponseStyle]=useState<ResponseStyle>("balanced");
+ const [preferencesLoading,setPreferencesLoading]=useState(true);
+ const [preferencesSaving,setPreferencesSaving]=useState(false);
+ const [preferencesError,setPreferencesError]=useState("");
  const [actionsFor,setActionsFor]=useState<string|null>(null);
  const [renaming,setRenaming]=useState<string|null>(null);
  const [titleDraft,setTitleDraft]=useState("");
@@ -88,6 +99,19 @@ export function ChatWorkspace({user,initialConversationId=null}:{user:{name:stri
  const abort=useRef<AbortController|null>(null);
  const groups=["Today","Yesterday","Previous 7 days","Older"];
  useEffect(()=>{document.documentElement.dataset.theme=dark?"dark":"light"},[dark]);
+ useEffect(()=>{
+  let mounted=true;
+  void apiJson("/api/settings").then(data=>{
+   if(!mounted)return;
+   const value=(data as {settings:Preferences}).settings;
+   if(value&&["light","dark"].includes(value.theme)&&["balanced","concise","detailed"].includes(value.responseStyle)){
+    applyThemeToBrowser(value.theme);
+    setResponseStyle(value.responseStyle);
+   }else setPreferencesError("Invalid account preferences. Please reload.");
+  }).catch(()=>{if(mounted)setPreferencesError("Unable to sync your preferences. Changes may not persist.")})
+   .finally(()=>{if(mounted)setPreferencesLoading(false)});
+  return ()=>{mounted=false};
+ },[]);
  useEffect(()=>{
   let mounted=true;
   void fetchProviderDirectory().then(directory=>{
@@ -181,7 +205,30 @@ export function ChatWorkspace({user,initialConversationId=null}:{user:{name:stri
   if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="k"){e.preventDefault();setSearchOpen(true);setSidebarOpen(true);requestAnimationFrame(()=>searchRef.current?.focus())}
   if((e.metaKey||e.ctrlKey)&&e.shiftKey&&e.key.toLowerCase()==="o"){e.preventDefault();startNew()}
  };window.addEventListener("keydown",handler);return()=>window.removeEventListener("keydown",handler)});
- const setTheme=(next:boolean)=>{localStorage.setItem("mechat.theme",next?"dark":"light");window.dispatchEvent(new Event("mechat-theme"))};
+ async function changePreferences(patch:Partial<Preferences>){
+  if(preferencesLoading||preferencesSaving)return;
+  const previousTheme=dark?"dark":"light";
+  const previousStyle=responseStyle;
+  setPreferencesError("");
+  setPreferencesSaving(true);
+  if(patch.theme)applyThemeToBrowser(patch.theme);
+  if(patch.responseStyle)setResponseStyle(patch.responseStyle);
+  try{
+   const result=await apiJson("/api/settings",{
+    method:"PATCH",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify(patch)
+   }) as {settings:Preferences};
+   if(!result.settings)throw new Error("Settings response was incomplete.");
+   applyThemeToBrowser(result.settings.theme);
+   setResponseStyle(result.settings.responseStyle);
+  }catch(e){
+   applyThemeToBrowser(previousTheme);
+   setResponseStyle(previousStyle);
+   const message=e instanceof Error?e.message:"Unable to save account preferences.";
+   setPreferencesError(message);setLoadError("Preferences were not saved: "+message);
+  }finally{setPreferencesSaving(false)}
+ }
+ const setTheme=(next:boolean)=>{void changePreferences({theme:next?"dark":"light"})};
  const reloadList=async()=>{
   const query=historyQueryRef.current;
   try{
@@ -347,7 +394,7 @@ export function ChatWorkspace({user,initialConversationId=null}:{user:{name:stri
       <button className="account-control" onClick={()=>setMenuOpen(!menuOpen)} aria-expanded={menuOpen}>
         <span className="user-avatar">{initials}</span><span className="user-detail"><strong>{user.name}</strong><small>Personal workspace</small></span><ChevronDown size={16}/>
       </button>
-      {menuOpen&&<div className="account-menu"><div className="account-email">{user.email}</div><button onClick={()=>{setSettingsOpen(true);setMenuOpen(false)}}><Settings2 size={17}/> Settings</button><button onClick={()=>setTheme(!dark)}>{dark?<Sun size={17}/>:<Moon size={17}/>} {dark?"Light appearance":"Dark appearance"}</button><button onClick={()=>void signOut()}><LogOut size={17}/> Sign out</button></div>}
+      {menuOpen&&<div className="account-menu"><div className="account-email">{user.email}</div><button onClick={()=>{setSettingsOpen(true);setMenuOpen(false)}}><Settings2 size={17}/> Settings</button><button disabled={preferencesLoading||preferencesSaving} onClick={()=>setTheme(!dark)}>{dark?<Sun size={17}/>:<Moon size={17}/>} {dark?"Light appearance":"Dark appearance"}</button><button onClick={()=>void signOut()}><LogOut size={17}/> Sign out</button></div>}
     </div>
    </aside>
    <main className="conversation-main">
@@ -372,7 +419,7 @@ export function ChatWorkspace({user,initialConversationId=null}:{user:{name:stri
          {selectedProvider==="auto"&&<p className="model-privacy">{providerDirectory?.autoDisclosure}</p>}
         </div>}
       </div>
-      <div className="topbar-right"><span className="private-pill"><ShieldCheck size={14}/> Signed in</span><button className="icon-button" title="Appearance" aria-label="Toggle appearance" onClick={()=>setTheme(!dark)}>{dark?<Sun size={19}/>:<Moon size={19}/>}</button><span className="topbar-avatar" title={user.name}>{initials}</span></div>
+      <div className="topbar-right"><span className="private-pill"><ShieldCheck size={14}/> Signed in</span><button className="icon-button" title="Appearance" aria-label="Toggle appearance" disabled={preferencesLoading||preferencesSaving} onClick={()=>setTheme(!dark)}>{dark?<Sun size={19}/>:<Moon size={19}/>}</button><span className="topbar-avatar" title={user.name}>{initials}</span></div>
     </header>
     {loadError&&<div className="inline-alert" role="alert">{loadError}<button aria-label="Dismiss error" onClick={()=>setLoadError("")}><X size={16}/></button></div>}
     <div className="message-viewport" ref={viewport} onScroll={()=>{const el=viewport.current;if(el)shouldFollow.current=el.scrollHeight-el.scrollTop-el.clientHeight<140;}}>
@@ -409,8 +456,11 @@ export function ChatWorkspace({user,initialConversationId=null}:{user:{name:stri
       <p className="composer-disclaimer">{providerBusy?"Checking AI models…":selectedProvider==="gemini"?"Google free-tier data-use terms apply. Verify important answers.":selectedProvider==="auto"?"Auto may send prompts to several providers. Verify important answers.":"MeChat can make mistakes. Verify important information."}</p>
     </div>
    </main>
-   {settingsOpen&&<div className="modal-overlay" role="presentation" onClick={()=>setSettingsOpen(false)}><section role="dialog" aria-modal="true" aria-label="Settings" className="modal-card settings-card" onClick={e=>e.stopPropagation()}><header><div><h2>Settings</h2><p>Customize your space</p></div><button className="icon-button" aria-label="Close settings" onClick={()=>setSettingsOpen(false)}><X size={20}/></button></header><div className="settings-row"><div><strong>Appearance</strong><p>Choose a comfortable reading environment.</p></div><div className="theme-buttons"><button className={!dark?"active":""} onClick={()=>setTheme(false)}><Sun size={16}/> Light</button><button className={dark?"active":""} onClick={()=>setTheme(true)}><Moon size={16}/> Dark</button></div></div><div className="settings-row"><div><strong>Your account</strong><p>{user.email}</p></div><UserRound size={20}/></div><div className="settings-row"><div><strong>Download chat history</strong><p>Export your saved conversations, messages, and basic account details as JSON.</p></div><button type="button" className="secondary-button" onClick={()=>downloadHistory("/api/data/export")}><FileText size={16}/> Export data</button></div>
+   {settingsOpen&&<div className="modal-overlay" role="presentation" onClick={()=>setSettingsOpen(false)}><section role="dialog" aria-modal="true" aria-label="Settings" className="modal-card settings-card" onClick={e=>e.stopPropagation()}><header><div><h2>Settings</h2><p>Customize your space</p></div><button className="icon-button" aria-label="Close settings" onClick={()=>setSettingsOpen(false)}><X size={20}/></button></header><div className="settings-row"><div><strong>Appearance</strong><p>Choose a comfortable reading environment.</p></div><div className="theme-buttons"><button className={!dark?"active":""} disabled={preferencesLoading||preferencesSaving} onClick={()=>setTheme(false)}><Sun size={16}/> Light</button><button className={dark?"active":""} disabled={preferencesLoading||preferencesSaving} onClick={()=>setTheme(true)}><Moon size={16}/> Dark</button></div></div><div className="settings-row"><div><strong>Response style</strong><p>Choose how much detail MeChat gives in its replies. This is saved to your account.</p></div><div className="response-style-buttons" role="group" aria-label="Response style">{(["balanced","concise","detailed"] as const).map(style=><button type="button" key={style} aria-pressed={responseStyle===style} className={responseStyle===style?"active":""} disabled={preferencesLoading||preferencesSaving} onClick={()=>void changePreferences({responseStyle:style})}>{style[0].toUpperCase()+style.slice(1)}</button>)}</div></div><div className="settings-row"><div><strong>Your account</strong><p>{user.email}</p></div><UserRound size={20}/></div><div className="settings-row"><div><strong>Download chat history</strong><p>Export your saved conversations, messages, and basic account details as JSON.</p></div><button type="button" className="secondary-button" onClick={()=>downloadHistory("/api/data/export")}><FileText size={16}/> Export data</button></div>
       <div className="settings-row"><div><strong>Clear conversation history</strong><p>Delete saved chats and messages, but retain your account and usage counters.</p></div><button type="button" className="secondary-button" onClick={()=>{setClearPhrase("");setConfirmClear(true);setSettingsOpen(false)}}><Trash2 size={16}/> Clear chats</button></div>
+      {preferencesLoading&&<p className="preferences-status" role="status">Loading your account preferences…</p>}
+      {preferencesSaving&&<p className="preferences-status" role="status">Saving preferences…</p>}
+      {preferencesError&&<p className="preferences-error" role="alert">{preferencesError}</p>}
       <div className="settings-footer"><FileText size={16}/> Your conversations are saved to your account. Your selected AI provider processes the messages you send.</div></section></div>}
    {confirmClear&&<div className="modal-overlay" role="presentation" onClick={()=>{if(!clearingHistory){setConfirmClear(false);setClearPhrase("")}}}><section className="modal-card" role="alertdialog" aria-modal="true" aria-label="Delete all conversations" onClick={e=>e.stopPropagation()}><h2>Delete all conversations?</h2><p>This permanently deletes your saved conversations and messages, but keeps your MeChat account and content-free usage counters. It cannot be undone. Export your history first if needed.</p><label htmlFor="clear-chats-confirm">Type DELETE ALL CHATS to confirm</label><input id="clear-chats-confirm" autoComplete="off" value={clearPhrase} onChange={e=>setClearPhrase(e.target.value)} placeholder="DELETE ALL CHATS" maxLength={32}/><div className="modal-actions"><button className="secondary-button" disabled={clearingHistory} onClick={()=>{setConfirmClear(false);setClearPhrase("")}}>Cancel</button><button className="danger-button" disabled={clearPhrase!=="DELETE ALL CHATS"||clearingHistory} onClick={()=>void clearAllHistory()}>{clearingHistory?"Deleting…":"Delete all chats"}</button></div></section></div>}
    {removeTarget&&<div className="modal-overlay" role="presentation" onClick={()=>setRemoveTarget(null)}><section className="modal-card" role="alertdialog" aria-modal="true" aria-label="Delete conversation" onClick={e=>e.stopPropagation()}><h2>Delete conversation?</h2><p>All messages in this conversation will be permanently deleted. This action cannot be undone.</p><div className="modal-actions"><button className="secondary-button" onClick={()=>setRemoveTarget(null)}>Cancel</button><button className="danger-button" onClick={()=>void deleteThread()}>Delete conversation</button></div></section></div>}
