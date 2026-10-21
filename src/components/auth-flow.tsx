@@ -93,8 +93,8 @@ export function AuthFlow({mode="login",enabled}:{mode?:Screen;enabled:boolean}){
       </form>
       {step==="verify"&&<button disabled={!enabled||busy} className="auth-text-link resend-link" onClick={resend}>Send a new code</button>}
       <div className="auth-switch">
-        {step==="login"?<>New to MeChat? <button onClick={()=>navigate("register")}>Create an account</button></>:
-         step==="register"?<>Already have an account? <button onClick={()=>navigate("login")}>Sign in</button></>:
+        {step==="login"?<>New to MeChat? <button onClick={()=>router.push("/sign-up")}>Create an account</button></>:
+         step==="register"?<>Already have an account? <button onClick={()=>router.push("/sign-in")}>Sign in</button></>:
          <>Remember your password? <button onClick={()=>navigate("login")}>Back to sign in</button></>}
       </div>
       <p className="auth-terms"><ShieldCheck size={14}/> Your conversations stay private to your account. By continuing, you agree to use MeChat responsibly.</p>
