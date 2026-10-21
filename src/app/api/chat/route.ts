@@ -1,4 +1,4 @@
-import {and,asc,desc,eq,sql} from "drizzle-orm";
+import {and,eq,sql} from "drizzle-orm";
 import {aiDailyQuotas,conversations,messages,usageEvents} from "@/db/schema";
 import {getDatabase} from "@/db/client";
 import {getUserSession} from "@/lib/session";
