@@ -117,7 +117,7 @@ export function ChatWorkspace({user,initialConversationId=null}:{user:{name:stri
      const res=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({conversationId:activeId,content,requestId}),signal:control.signal});
      if(!res.ok){const v:unknown=await res.json().catch(()=>({}));throw new Error(resultError(v,"Unable to reach the AI service."))}
      if(!res.body)throw new Error("The response stream could not be opened.");
-     const reader=res.body.getReader();let buffer="",decoder=new TextDecoder(),done=false;
+     const reader=res.body.getReader();let buffer="",done=false;const decoder=new TextDecoder();
      while(!done){
        const part=await reader.read();if(part.done)break;
        buffer+=decoder.decode(part.value,{stream:true});
