@@ -3,13 +3,28 @@ import { FormEvent, KeyboardEvent, useEffect, useRef, useState, useSyncExternalS
 import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { ArrowUp, Check, ChevronDown, CircleHelp, Copy, Ellipsis, FileText, LogOut, Menu, MessageCircle, Moon, PanelLeftClose, PanelLeftOpen, Pencil, Plus, Search, Settings2, ShieldCheck, Sparkles, Sun, Trash2, UserRound, X } from "lucide-react";
+import { AlertCircle, ArrowUp, Check, ChevronDown, CircleHelp, Copy, Ellipsis, FileText, LogOut, Menu, MessageCircle, Moon, PanelLeftClose, PanelLeftOpen, Pencil, Plus, RefreshCw, Search, Settings2, ShieldCheck, Sparkles, Sun, Trash2, UserRound, X } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
 import { MeChatLogo, MeChatSymbol } from "@/components/logo";
 
 type StoredThread={id:string;title:string;updatedAt:string};
 type Role="user"|"assistant";
 type Message={id:string;role:Role;content:string;status?:"pending"|"complete"|"interrupted"|"failed"};
+type ProviderAvailability="checking"|"available"|"insufficient-balance"|"invalid-api-key"|"rate-limited"|"unavailable"|"unknown";
+async function fetchProviderAvailability():Promise<ProviderAvailability>{
+ try{
+   const response=await fetch("/api/health",{credentials:"same-origin",cache:"no-store"});
+   const value:unknown=await response.json();
+   if(!isRecord(value) || typeof value.provider!=="string")return "unknown";
+   if(value.provider==="available")return "available";
+   if(value.provider==="insufficient-balance")return "insufficient-balance";
+   if(value.provider==="invalid-api-key")return "invalid-api-key";
+   if(value.provider==="rate-limited")return "rate-limited";
+   if(value.provider==="provider-unavailable"||value.provider==="not-configured")return "unavailable";
+   return "unknown";
+ }catch{return "unknown"}
+}
+
 const starterIdeas=[
  {title:"Write and refine",text:"Help me draft a professional email that is clear, concise and friendly."},
  {title:"Learn something",text:"Explain the fundamentals of machine learning with useful examples."},
@@ -58,6 +73,7 @@ export function ChatWorkspace({user,initialConversationId=null}:{user:{name:stri
  const [lastError,setLastError]=useState("");
  const [modelInfo,setModelInfo]=useState(false);
  const [conversationsLoading,setConversationsLoading]=useState(true);
+ const [providerStatus,setProviderStatus]=useState<ProviderAvailability>("checking");
  const dark=useSyncExternalStore(subscribeTheme,readTheme,()=>false);
  const end=useRef<HTMLDivElement>(null);
  const composer=useRef<HTMLTextAreaElement>(null);
@@ -65,6 +81,25 @@ export function ChatWorkspace({user,initialConversationId=null}:{user:{name:stri
  const abort=useRef<AbortController|null>(null);
  const groups=["Today","Yesterday","Previous 7 days","Older"];
  useEffect(()=>{document.documentElement.dataset.theme=dark?"dark":"light"},[dark]);
+ useEffect(()=>{
+   let active=true;
+   void fetchProviderAvailability().then(status=>{if(active)setProviderStatus(status)});
+   return ()=>{active=false};
+ },[]);
+ const refreshProvider=()=>{
+   setProviderStatus("checking");
+   void fetchProviderAvailability().then(setProviderStatus);
+ };
+ const chatAvailable=providerStatus==="available"||providerStatus==="unknown";
+ const statusNotice=providerStatus==="insufficient-balance"
+   ?"AI replies are paused while DeepSeek usage credits are unavailable. You can still read your conversations."
+   :providerStatus==="invalid-api-key"
+     ?"AI replies are paused while the connection is being configured. Previous conversations remain available."
+     :providerStatus==="rate-limited"
+       ?"The AI service is temporarily rate-limited. Your conversations remain available."
+       :providerStatus==="unavailable"
+         ?"The AI service is temporarily unavailable. You can still read your conversations."
+         :null;
  useEffect(()=>{let ignore=false;apiJson("/api/conversations").then(data=>{if(ignore)return;const obj=data as {conversations?:StoredThread[]};setThreads(obj.conversations??[])}).catch(()=>{if(!ignore)setLoadError("Unable to load your conversations.")}).finally(()=>{if(!ignore)setConversationsLoading(false)});return()=>{ignore=true}},[]);
  useEffect(()=>{
   if(!activeId)return;
@@ -107,7 +142,7 @@ export function ChatWorkspace({user,initialConversationId=null}:{user:{name:stri
    try{const payload:unknown=JSON.parse(data);return isRecord(payload)?{event:evt,payload}:null}catch{return null}
  }
  async function sendText(text:string){
-   if(busy)return;
+   if(busy||!chatAvailable)return;
    const content=text.trim();if(!content||content.length>8000)return;
    setBusy(true);setLastError("");setDraft("");
    const requestId=crypto.randomUUID(),mineId=crypto.randomUUID(),replyId=crypto.randomUUID();
@@ -124,6 +159,11 @@ export function ChatWorkspace({user,initialConversationId=null}:{user:{name:stri
      });
      if(!res.ok){
        const data:unknown=await res.json().catch(()=>({}));
+       if(isRecord(data)&&typeof data.reason==="string"){
+         if(data.reason==="insufficient-balance")setProviderStatus("insufficient-balance");
+         else if(data.reason==="invalid-api-key")setProviderStatus("invalid-api-key");
+         else if(data.reason==="rate-limited")setProviderStatus("rate-limited");
+       }
        if(isRecord(data)&&typeof data.conversationId==="string")savedConversationId=data.conversationId;
        throw new Error(resultError(data,"Unable to reach the AI service."));
      }
@@ -241,12 +281,17 @@ export function ChatWorkspace({user,initialConversationId=null}:{user:{name:stri
        </div>}
     </div>
     <div className="composer-dock">
+      {statusNotice&&<div className="provider-outage" role="status">
+        <AlertCircle size={18} aria-hidden="true"/>
+        <p>{statusNotice}</p>
+        <button type="button" onClick={refreshProvider} title="Check AI service availability" aria-label="Check AI service availability"><RefreshCw size={17}/><span>Check again</span></button>
+      </div>}
       {lastError&&<div className="composer-error"><CircleHelp size={16}/><span>{lastError}</span><button aria-label="Dismiss message" onClick={()=>setLastError("")}><X size={15}/></button></div>}
       <form className="chat-composer" onSubmit={onSubmit}>
         <textarea ref={composer} rows={2} maxLength={8000} placeholder="Message MeChat" aria-label="Message MeChat" value={draft} onChange={e=>setDraft(e.target.value)} onKeyDown={onComposerKey} disabled={busy}/>
-        <div className="composer-bottom"><div className="composer-left"><button title="Attachments coming soon" aria-label="Attachments not yet available" disabled type="button" className="icon-button"><Plus size={19}/></button><span className="model-label"><Sparkles size={15}/> DeepSeek Flash</span></div><div className="composer-actions"><span className="composer-count">{draft.length?draft.length+"/8000":""}</span>{busy?<button className="send-control is-busy" type="button" aria-label="Stop response" onClick={()=>abort.current?.abort()}><span className="stop-square"/></button>:<button className="send-control" type="submit" aria-label="Send message" disabled={!draft.trim()}><ArrowUp size={20}/></button>}</div></div>
+        <div className="composer-bottom"><div className="composer-left"><button title="Attachments coming soon" aria-label="Attachments not yet available" disabled type="button" className="icon-button"><Plus size={19}/></button><span className="model-label"><Sparkles size={15}/> DeepSeek Flash</span></div><div className="composer-actions"><span className="composer-count">{draft.length?draft.length+"/8000":""}</span>{busy?<button className="send-control is-busy" type="button" aria-label="Stop response" onClick={()=>abort.current?.abort()}><span className="stop-square"/></button>:<button className="send-control" type="submit" aria-label="Send message" disabled={!draft.trim()||!chatAvailable}><ArrowUp size={20}/></button>}</div></div>
       </form>
-      <p className="composer-disclaimer">MeChat can make mistakes. Verify important information.</p>
+      <p className="composer-disclaimer">{providerStatus==="checking"?"Checking AI service availability…":statusNotice?"Messaging will resume when the AI service is available.":"MeChat can make mistakes. Verify important information."}</p>
     </div>
    </main>
    {settingsOpen&&<div className="modal-overlay" role="presentation" onClick={()=>setSettingsOpen(false)}><section role="dialog" aria-modal="true" aria-label="Settings" className="modal-card settings-card" onClick={e=>e.stopPropagation()}><header><div><h2>Settings</h2><p>Customize your space</p></div><button className="icon-button" aria-label="Close settings" onClick={()=>setSettingsOpen(false)}><X size={20}/></button></header><div className="settings-row"><div><strong>Appearance</strong><p>Choose a comfortable reading environment.</p></div><div className="theme-buttons"><button className={!dark?"active":""} onClick={()=>setTheme(false)}><Sun size={16}/> Light</button><button className={dark?"active":""} onClick={()=>setTheme(true)}><Moon size={16}/> Dark</button></div></div><div className="settings-row"><div><strong>Your account</strong><p>{user.email}</p></div><UserRound size={20}/></div><div className="settings-footer"><FileText size={16}/> Your conversations are stored securely and available on sign-in.</div></section></div>}
