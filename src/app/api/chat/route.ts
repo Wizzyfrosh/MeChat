@@ -63,7 +63,7 @@ export async function POST(req:Request){
   if(existing)return json({error:"This request was already submitted."},409);
 
   const rows=oldId?await db.select({role:messages.role,content:messages.content,status:messages.status}).from(messages)
-    .where(eq(messages.conversationId,oldId)).orderBy(desc(messages.createdAt),desc(messages.requestId),asc(messages.role)).limit(16):[];
+    .where(eq(messages.conversationId,oldId)).orderBy(desc(messages.createdAt),desc(messages.requestId),desc(messages.role)).limit(16):[];
   const history:PromptMessage[]=rows.reverse().filter(m=>m.status==="complete"&&m.content).map(m=>({role:m.role,content:m.content}));
   const prompt:PromptMessage[]=[{role:"system",content:instruction},...history,{role:"user",content}];
 
