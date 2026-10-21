@@ -74,6 +74,8 @@ export function ChatWorkspace({user,initialConversationId=null}:{user:{name:stri
  const [providerFault,setProviderFault]=useState("");
  const dark=useSyncExternalStore(subscribeTheme,readTheme,()=>false);
  const end=useRef<HTMLDivElement>(null);
+ const viewport=useRef<HTMLDivElement>(null);
+ const shouldFollow=useRef(true);
  const composer=useRef<HTMLTextAreaElement>(null);
  const searchRef=useRef<HTMLInputElement>(null);
  const abort=useRef<AbortController|null>(null);
@@ -127,15 +129,25 @@ export function ChatWorkspace({user,initialConversationId=null}:{user:{name:stri
   }).catch(()=>{if(!ignore){setLoadingMessages(false);setLoadError("Unable to open conversation.")}});
   return()=>{ignore=true};
  },[activeId]);
- useEffect(()=>{end.current?.scrollIntoView({block:"end",behavior:"smooth"})},[messages]);
+ useEffect(()=>{
+  if(shouldFollow.current&&viewport.current){
+   viewport.current.scrollTop=viewport.current.scrollHeight;
+  }
+ },[messages]);
+ useEffect(()=>{
+  const el=composer.current;
+  if(!el)return;
+  el.style.height="auto";
+  el.style.height=Math.min(el.scrollHeight,164)+"px";
+ },[draft]);
  useEffect(()=>{const handler=(e:globalThis.KeyboardEvent)=>{
   if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="k"){e.preventDefault();setSearchOpen(true);setSidebarOpen(true);requestAnimationFrame(()=>searchRef.current?.focus())}
   if((e.metaKey||e.ctrlKey)&&e.shiftKey&&e.key.toLowerCase()==="o"){e.preventDefault();startNew()}
  };window.addEventListener("keydown",handler);return()=>window.removeEventListener("keydown",handler)});
  const setTheme=(next:boolean)=>{localStorage.setItem("mechat.theme",next?"dark":"light");window.dispatchEvent(new Event("mechat-theme"))};
  const reloadList=async()=>{try{const data=await apiJson("/api/conversations") as {conversations:StoredThread[]};setThreads(data.conversations)}catch{}};
- function startNew(){if(busy)return;setActiveId(null);setMessages([]);setDraft("");setLastError("");setLoadingMessages(false);setSidebarOpen(false);setActionsFor(null);router.push("/chat");requestAnimationFrame(()=>composer.current?.focus())}
- function openThread(id:string){if(busy)return;setLastError("");setSidebarOpen(false);setActionsFor(null);setLoadingMessages(true);setActiveId(id);router.push("/chat/"+encodeURIComponent(id))}
+ function startNew(){if(busy)return;shouldFollow.current=true;setActiveId(null);setMessages([]);setDraft("");setLastError("");setLoadingMessages(false);setSidebarOpen(false);setActionsFor(null);router.push("/chat");requestAnimationFrame(()=>composer.current?.focus())}
+ function openThread(id:string){if(busy)return;shouldFollow.current=true;setLastError("");setSidebarOpen(false);setActionsFor(null);setLoadingMessages(true);setActiveId(id);router.push("/chat/"+encodeURIComponent(id))}
  async function rename(id:string){
   const title=titleDraft.trim();if(!title)return;
   try{await apiJson("/api/conversations/"+id,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({title:title.slice(0,160)})});setThreads(old=>old.map(t=>t.id===id?{...t,title}:t));setRenaming(null);setActionsFor(null)}
@@ -159,6 +171,7 @@ export function ChatWorkspace({user,initialConversationId=null}:{user:{name:stri
  }
  async function sendText(text:string){
    if(busy||!chatAvailable)return;
+   shouldFollow.current=true;
    const content=text.trim();if(!content||content.length>8000)return;
    setBusy(true);setLastError("");setDraft("");
    const requestId=crypto.randomUUID(),mineId=crypto.randomUUID(),replyId=crypto.randomUUID();
@@ -274,7 +287,7 @@ export function ChatWorkspace({user,initialConversationId=null}:{user:{name:stri
       <div className="topbar-left">
         <button className="icon-button mobile-menu" aria-label="Open sidebar" onClick={()=>setSidebarOpen(true)}><Menu size={21}/></button>
         {collapsed&&<button className="icon-button desktop-sidebar-open" aria-label="Expand sidebar" onClick={()=>setCollapsed(false)}><PanelLeftOpen size={19}/></button>}
-        <button className="model-switch" onClick={()=>setModelInfo(!modelInfo)} aria-expanded={modelInfo} aria-label="Choose AI model">{selectedLabel} <ChevronDown size={16}/></button>
+        <button className="model-switch" onClick={()=>setModelInfo(!modelInfo)} aria-expanded={modelInfo} aria-label="Choose AI model"><span className="model-switch-label">{selectedLabel}</span><ChevronDown size={16}/></button>
         {modelInfo&&<div className="model-popover" role="group" aria-label="Available AI models">
          <strong>Choose an AI model</strong>
          <p>Free tiers have individual usage limits. Select a provider to control where each message is sent.</p>
@@ -294,14 +307,17 @@ export function ChatWorkspace({user,initialConversationId=null}:{user:{name:stri
       <div className="topbar-right"><span className="private-pill"><ShieldCheck size={14}/> Private workspace</span><button className="icon-button" title="Appearance" aria-label="Toggle appearance" onClick={()=>setTheme(!dark)}>{dark?<Sun size={19}/>:<Moon size={19}/>}</button><span className="topbar-avatar" title={user.name}>{initials}</span></div>
     </header>
     {loadError&&<div className="inline-alert" role="alert">{loadError}<button aria-label="Dismiss error" onClick={()=>setLoadError("")}><X size={16}/></button></div>}
-    <div className="message-viewport">
+    <div className="message-viewport" ref={viewport} onScroll={()=>{const el=viewport.current;if(el)shouldFollow.current=el.scrollHeight-el.scrollTop-el.clientHeight<140;}}>
       {!activeId&&messages.length===0?<div className="welcome-conversation">
         <div className="welcome-monogram"><MeChatSymbol size={48}/></div>
         <h1>What’s on your mind?</h1><p>Start a conversation, explore an idea, or work through something together.</p>
         <div className="prompt-grid">{starterIdeas.map(idea=><button key={idea.title} onClick={()=>{setDraft(idea.text);composer.current?.focus()}}><strong>{idea.title}</strong><span>{idea.text}</span><ArrowUp size={16}/></button>)}</div>
       </div>:loadingMessages?<div className="loading-conversation">Opening conversation…</div>:<div className="messages-container" role="log" aria-label="Conversation">
          {messages.map(msg=><article className={`conversation-message ${msg.role}`} key={msg.id}>
-           {msg.role==="assistant"&&<div className="message-identity"><MeChatSymbol size={29}/><span>MeChat{msg.provider?" · "+(providerDirectory?.options.find(p=>p.id===msg.provider)?.label??msg.provider):""}</span></div>}
+           {msg.role==="assistant"&&<div className="message-identity">
+             <MeChatSymbol size={24}/><span className="assistant-name">MeChat</span>
+             {msg.provider&&<span className="assistant-provider">{msg.provider==="gemini"?"Gemini":msg.provider==="openrouter"?"OpenRouter":msg.provider==="groq"?"Groq":"DeepSeek"}</span>}
+           </div>}
            {msg.role==="user"?<div className="user-message-text">{msg.content}</div>:<div className="message-content">
              {msg.status==="pending"&&!msg.content?<div className="thinking-dots"><i/><i/><i/><span>Thinking</span></div>:<ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>}
              {(msg.status==="interrupted"||msg.status==="failed")&&<p className="message-error">This response could not be completed. Please try again.</p>}
@@ -319,7 +335,7 @@ export function ChatWorkspace({user,initialConversationId=null}:{user:{name:stri
       </div>}
       {lastError&&<div className="composer-error"><CircleHelp size={16}/><span>{lastError}</span><button aria-label="Dismiss message" onClick={()=>setLastError("")}><X size={15}/></button></div>}
       <form className="chat-composer" onSubmit={onSubmit}>
-        <textarea ref={composer} rows={2} maxLength={8000} placeholder="Message MeChat" aria-label="Message MeChat" value={draft} onChange={e=>setDraft(e.target.value)} onKeyDown={onComposerKey} disabled={busy}/>
+        <textarea ref={composer} rows={1} maxLength={8000} placeholder="Message MeChat" aria-label="Message MeChat" value={draft} onChange={e=>setDraft(e.target.value)} onKeyDown={onComposerKey} disabled={busy}/>
         <div className="composer-bottom"><div className="composer-left"><button title="Attachments coming soon" aria-label="Attachments not yet available" disabled type="button" className="icon-button"><Plus size={19}/></button><span className="model-label"><Sparkles size={15}/> {selectedLabel}</span></div><div className="composer-actions"><span className="composer-count">{draft.length?draft.length+"/8000":""}</span>{busy?<button className="send-control is-busy" type="button" aria-label="Stop response" onClick={()=>abort.current?.abort()}><span className="stop-square"/></button>:<button className="send-control" type="submit" aria-label="Send message" disabled={!draft.trim()||!chatAvailable}><ArrowUp size={20}/></button>}</div></div>
       </form>
       <p className="composer-disclaimer">{providerBusy?"Checking AI models…":selectedProvider==="gemini"?"Google free-tier data-use terms apply. Verify important answers.":selectedProvider==="auto"?"Auto may send prompts to several providers. Verify important answers.":"MeChat can make mistakes. Verify important information."}</p>
