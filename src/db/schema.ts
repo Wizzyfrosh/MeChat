@@ -1,4 +1,4 @@
-import { bigint, index, integer, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid, varchar } from "drizzle-orm/pg-core";
+import { bigint, date, index, integer, pgEnum, pgTable, primaryKey, text, timestamp, uniqueIndex, uuid, varchar } from "drizzle-orm/pg-core";
 
 // Better Auth owns its user/session/account/verification tables.
 // IDs here match its text-based user IDs. API ownership checks are mandatory.
@@ -59,3 +59,11 @@ export const usageEvents = pgTable("usage_events", {
   index("usage_events_owner_time_idx").on(t.userId, t.createdAt.desc()),
   uniqueIndex("usage_events_request_unique_idx").on(t.requestId),
 ]);
+
+// Atomic daily reservations prevent concurrent requests bypassing cost ceilings.
+export const aiDailyQuotas = pgTable("ai_daily_quotas", {
+  userId: text("user_id").notNull(),
+  day: date("day", { mode: "string" }).notNull(),
+  requests: integer("requests").notNull().default(0),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [primaryKey({ columns: [t.userId, t.day], name: "ai_daily_quotas_pkey" })]);
