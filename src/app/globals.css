@@ -375,3 +375,8 @@ h1,h2,h3,h4,p{margin-top:0}svg{flex-shrink:0}
  .model-popover{max-width:calc(100vw - 30px)}
 }
 @media(max-width:390px){.welcome-conversation{padding-top:18px}.prompt-grid button{min-height:76px}}
+/* Install promotion appears only when the browser offers native installation. */
+.app-install{position:fixed;right:max(18px,env(safe-area-inset-right));bottom:max(18px,env(safe-area-inset-bottom));z-index:150;display:flex;align-items:center;gap:5px;padding:6px;border:1px solid var(--hairline);border-radius:14px;background:var(--canvas);box-shadow:var(--shadow)}
+.app-install button{display:flex;align-items:center;justify-content:center;gap:9px;min-height:40px;border:0;border-radius:9px;padding:8px 12px;background:transparent;color:var(--ink);font-size:13px;font-weight:650}.app-install button:hover{background:var(--hover)}
+@media(max-width:640px){.app-install{bottom:auto;top:calc(env(safe-area-inset-top) + 68px);right:12px}}
+@media(display-mode:standalone){.app-install{display:none}.chat-app-shell{padding-top:env(safe-area-inset-top);padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right)}.auth-main{padding-top:max(22px,env(safe-area-inset-top));padding-bottom:max(20px,env(safe-area-inset-bottom))}}

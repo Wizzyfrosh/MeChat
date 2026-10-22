@@ -53,3 +53,9 @@ Code generation: `npm run db:generate`. Inspect SQL on a disposable Neon develop
 - Avoid publishing a claim that MeChat is production-ready before these gates pass.
 
 See `docs/` for implementation roadmap and security notes.
+
+### Install MeChat as an app
+
+Open the HTTPS production site in Chrome and select **Install MeChat** when offered, or use Chrome's **Install app / Add to home screen** menu. The app opens in its own standalone window. On iPhone/iPad, use Safari's **Share → Add to Home Screen → Open as Web App**.
+
+The manifest starts at `/chat`; the existing session check sends signed-out users to sign-in. Only the public offline screen is cached. Signing in, loading conversations, and generating replies require internet; private pages, API responses and credentials are never added to the service-worker cache. Browser installation prompts remain controlled by the browser and may require interaction with the site first.
