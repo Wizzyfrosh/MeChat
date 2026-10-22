@@ -72,3 +72,16 @@ test("does not break turn integrity to fit an old response",()=>{
  assert.equal(output.length,4);
  assert.equal(output[0].content[0],"c");
 });
+
+test("route-specific JSON limits reject oversized rename payloads",async()=>{
+ const data=JSON.stringify({title:"x".repeat(2048)});
+ const result=await readBoundedChatJson(post(data),2048);
+ assert.equal(result.ok,false);
+ assert.equal(result.status,413);
+ const accepted=await readBoundedChatJson(post('{"title":"Safe title"}'),2048);
+ assert.equal(accepted.ok,true);
+});
+test("invalid bounded-parser configuration fails closed",async()=>{
+ await assert.rejects(()=>readBoundedChatJson(post("{}"),MAX_CHAT_REQUEST_BYTES+1),RangeError);
+ await assert.rejects(()=>readBoundedChatJson(post("{}"),0),RangeError);
+});
