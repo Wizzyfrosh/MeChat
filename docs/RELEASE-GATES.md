@@ -93,6 +93,17 @@ In the Vercel `mechat` project, check the **Production** environment for:
 **Do not deploy to production** if any required item is missing or if the
 preview and production database URLs unexpectedly point to the same database.
 
+
+### Verified Neon schema observation (2026-10-22)
+
+Read-only inspection of Neon project `orange-bar-92581848` found:
+
+- `mechat-preview` branch (`br-blue-cake-ar9amf8p`): **all nine** expected app/auth tables are present.
+- `main` branch (`br-square-cake-arbrz98c`): **none** of the nine expected tables are present.
+- Vercel Production `DATABASE_URL` is configured but its target branch has **not** been verified. Its presence must not be interpreted as a working production schema.
+
+**Required action before a production deploy:** verify which exact Neon project, database and branch the Vercel Production connection targets, without printing credentials. If it points to `main`, review a production schema migration plan, backup/rollback and user data migration decisions first. Never point Production at `mechat-preview` merely to bypass schema setup. No schema mutations were performed during this review.
+
 ## 6. Production release and rollback
 
 - [ ] Resolve every required PR and security gate.
