@@ -6,6 +6,7 @@ import remarkGfm from "remark-gfm";
 import { AlertCircle, ArrowUp, Check, ChevronDown, CircleHelp, Copy, Ellipsis, FileText, LogOut, Menu, MessageCircle, Moon, PanelLeftClose, PanelLeftOpen, Pencil, Plus, RefreshCw, Search, Settings2, ShieldCheck, Sparkles, Sun, Trash2, UserRound, X } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
 import { MeChatLogo, MeChatSymbol } from "@/components/logo";
+import { getWebShortcut } from "@/lib/web-shortcuts.mjs";
 
 type StoredThread={id:string;title:string;updatedAt:string};
 type Role="user"|"assistant";
@@ -201,10 +202,30 @@ export function ChatWorkspace({user,initialConversationId=null}:{user:{name:stri
   el.style.height="auto";
   el.style.height=Math.min(el.scrollHeight,164)+"px";
  },[draft]);
- useEffect(()=>{const handler=(e:globalThis.KeyboardEvent)=>{
-  if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="k"){e.preventDefault();setSearchOpen(true);setSidebarOpen(true);requestAnimationFrame(()=>searchRef.current?.focus())}
-  if((e.metaKey||e.ctrlKey)&&e.shiftKey&&e.key.toLowerCase()==="o"){e.preventDefault();startNew()}
- };window.addEventListener("keydown",handler);return()=>window.removeEventListener("keydown",handler)});
+ useEffect(()=>{
+  const handler=(e:globalThis.KeyboardEvent)=>{
+   const action=getWebShortcut(e);
+   if(action==="search"){
+    e.preventDefault();
+    setSearchOpen(true);
+    setCollapsed(false);
+    setSidebarOpen(true);
+    requestAnimationFrame(()=>searchRef.current?.focus());
+   }else if(action==="new-chat"){
+    e.preventDefault();
+    startNew();
+   }else if(action==="dismiss"){
+    // Escape closes temporary browser UI; it must not silently cancel a
+    // destructive action already running or discard an active AI response.
+    setModelInfo(false);setMenuOpen(false);setActionsFor(null);
+    setSidebarOpen(false);setSearchOpen(false);setSettingsOpen(false);
+    setRemoveTarget(null);
+    if(!clearingHistory){setConfirmClear(false);setClearPhrase("");}
+   }
+  };
+  window.addEventListener("keydown",handler);
+  return()=>window.removeEventListener("keydown",handler);
+ });
  async function changePreferences(patch:Partial<Preferences>){
   if(preferencesLoading||preferencesSaving)return;
   const previousTheme=dark?"dark":"light";
@@ -374,8 +395,8 @@ export function ChatWorkspace({user,initialConversationId=null}:{user:{name:stri
       <button className="icon-button mobile-drawer-close" aria-label="Close sidebar" onClick={()=>setSidebarOpen(false)}><X size={21}/></button>
     </div>
     <div className="sidebar-commands">
-      <button className="command-new" onClick={startNew} title="New chat"><Plus size={19}/><span>New chat</span><span className="key-hint">⌘ ⇧ O</span></button>
-      <button className="command-search" onClick={()=>{setSearchOpen(!searchOpen);setCollapsed(false);requestAnimationFrame(()=>searchRef.current?.focus())}} title="Search conversations"><Search size={19}/><span>Search chats</span><span className="key-hint">⌘ K</span></button>
+      <button className="command-new" onClick={startNew} title="New chat (Ctrl or Command + Shift + O)"><Plus size={19}/><span>New chat</span><span className="key-hint" aria-hidden="true">⌘ / Ctrl ⇧ O</span></button>
+      <button className="command-search" onClick={()=>{setSearchOpen(!searchOpen);setCollapsed(false);requestAnimationFrame(()=>searchRef.current?.focus())}} title="Search conversations (Ctrl or Command + K)"><Search size={19}/><span>Search chats</span><span className="key-hint" aria-hidden="true">⌘ / Ctrl K</span></button>
       {searchOpen&&<div className="sidebar-search-box"><Search size={16}/><input ref={searchRef} value={search} onChange={e=>{setSearch(e.target.value);setConversationsLoading(true);setThreads([]);setHistoryCursor(null);setLoadError("")}} placeholder="Search history" aria-label="Search history"/><button className="icon-button" aria-label="Clear search" onClick={()=>{setSearch("");setConversationsLoading(true);setThreads([]);setHistoryCursor(null);setSearchOpen(false)}}><X size={15}/></button></div>}
     </div>
     <div className="sidebar-scroll">
@@ -402,7 +423,7 @@ export function ChatWorkspace({user,initialConversationId=null}:{user:{name:stri
       <div className="topbar-left">
         <button className="icon-button mobile-menu" aria-label="Open sidebar" onClick={()=>setSidebarOpen(true)}><Menu size={21}/></button>
         {collapsed&&<button className="icon-button desktop-sidebar-open" aria-label="Expand sidebar" onClick={()=>setCollapsed(false)}><PanelLeftOpen size={19}/></button>}
-        <button className="model-switch" onClick={()=>setModelInfo(!modelInfo)} aria-expanded={modelInfo} aria-label="Choose AI model"><span className="model-switch-label">{selectedLabel}</span><ChevronDown size={16}/></button>
+        <button className="model-switch" type="button" onClick={()=>setModelInfo(!modelInfo)} aria-haspopup="true" aria-expanded={modelInfo} aria-label="Choose AI model"><span className="model-switch-label">{selectedLabel}</span><ChevronDown size={16}/></button>
         {modelInfo&&<div className="model-popover" role="group" aria-label="Available AI models">
          <strong>Choose an AI model</strong>
          <p>Free tiers have individual usage limits. Select a provider to control where each message is sent.</p>
@@ -422,9 +443,9 @@ export function ChatWorkspace({user,initialConversationId=null}:{user:{name:stri
       <div className="topbar-right"><span className="private-pill"><ShieldCheck size={14}/> Signed in</span><button className="icon-button" title="Appearance" aria-label="Toggle appearance" disabled={preferencesLoading||preferencesSaving} onClick={()=>setTheme(!dark)}>{dark?<Sun size={19}/>:<Moon size={19}/>}</button><span className="topbar-avatar" title={user.name}>{initials}</span></div>
     </header>
     {loadError&&<div className="inline-alert" role="alert">{loadError}<button aria-label="Dismiss error" onClick={()=>setLoadError("")}><X size={16}/></button></div>}
-    <div className="message-viewport" ref={viewport} onScroll={()=>{const el=viewport.current;if(el)shouldFollow.current=el.scrollHeight-el.scrollTop-el.clientHeight<140;}}>
+    <div className="message-viewport" id="conversation-feed" ref={viewport} onScroll={()=>{const el=viewport.current;if(el)shouldFollow.current=el.scrollHeight-el.scrollTop-el.clientHeight<140;}}>
       {!activeId&&messages.length===0?<div className="welcome-conversation">
-        <div className="welcome-monogram"><MeChatSymbol size={48}/></div>
+        <span className="welcome-kicker">YOUR AI WORKSPACE</span>
         <h1>What’s on your mind?</h1><p>Start a conversation, explore an idea, or work through something together.</p>
         <div className="prompt-grid">{starterIdeas.map(idea=><button key={idea.title} onClick={()=>{setDraft(idea.text);composer.current?.focus()}}><strong>{idea.title}</strong><span>{idea.text}</span><ArrowUp size={16}/></button>)}</div>
       </div>:loadingMessages?<div className="loading-conversation">Opening conversation…</div>:<div className="messages-container" role="log" aria-label="Conversation">
