@@ -9,13 +9,14 @@ export const MAX_CONTEXT_MESSAGE_CHARACTERS = 6_000;
 const failure=(status,error)=>({ok:false,status,error});
 
 /** Never trust Content-Length: also enforce the size while reading the stream. */
-export async function readBoundedChatJson(request) {
+export async function readBoundedChatJson(request,maxBytes=MAX_CHAT_REQUEST_BYTES) {
+  if(!Number.isSafeInteger(maxBytes)||maxBytes<1||maxBytes>MAX_CHAT_REQUEST_BYTES) throw new RangeError("Invalid request size cap.");
   const type=request.headers.get("content-type")?.trim() ?? "";
   if (!/^application\/json(?:\s*;|$)/i.test(type)) {
     return failure(415,"Send messages using application/json.");
   }
   const declared=request.headers.get("content-length");
-  if (declared!==null && (!/^\d+$/.test(declared) || Number(declared)>MAX_CHAT_REQUEST_BYTES)) {
+  if (declared!==null && (!/^\d+$/.test(declared) || Number(declared)>maxBytes)) {
     return failure(413,"Message request is too large.");
   }
   if (!request.body) return failure(400,"A JSON message body is required.");
@@ -28,7 +29,7 @@ export async function readBoundedChatJson(request) {
       const {value,done}=await reader.read();
       if (done) break;
       total+=value.byteLength;
-      if (total>MAX_CHAT_REQUEST_BYTES) {
+      if (total>maxBytes) {
         await reader.cancel().catch(()=>{});
         return failure(413,"Message request is too large.");
       }

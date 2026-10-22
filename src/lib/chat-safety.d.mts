@@ -4,7 +4,7 @@ export declare const MAX_CONTEXT_MESSAGE_CHARACTERS: number;
 export type ChatBodyResult =
   | {ok:true;value:unknown}
   | {ok:false;status:number;error:string};
-export declare function readBoundedChatJson(request:Request):Promise<ChatBodyResult>;
+export declare function readBoundedChatJson(request:Request,maxBytes?:number):Promise<ChatBodyResult>;
 export type HistoryRow = {
   requestId:string;
   role:"user"|"assistant";

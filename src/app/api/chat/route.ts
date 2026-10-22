@@ -9,6 +9,7 @@ import {shouldAutoTryNext} from "@/lib/ai-provider-routing.mjs";
 import {recentMessageOrder} from "@/lib/message-order";
 import {readBoundedChatJson,buildBoundedHistory} from "@/lib/chat-safety.mjs";
 import {responseStyleInstruction} from "@/lib/user-preferences.mjs";
+import {isSameOriginWrite} from "@/lib/request-security.mjs";
 
 export const runtime="nodejs";
 export const maxDuration=60;
@@ -21,7 +22,7 @@ export async function POST(req:Request){
  const session=await getUserSession();
  if(!session)return json({error:"Sign in to continue."},401);
  if(!session.user.emailVerified)return json({error:"Verify your email first."},403);
- if(req.headers.get("origin")&&req.headers.get("origin")!==new URL(req.url).origin)return json({error:"Invalid origin."},403);
+ if(!isSameOriginWrite(req))return json({error:"Invalid origin."},403);
 
  const parsed=await readBoundedChatJson(req);
  if(!parsed.ok)return json({error:parsed.error},parsed.status);
