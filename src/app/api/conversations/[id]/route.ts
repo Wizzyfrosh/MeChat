@@ -3,6 +3,8 @@ import { conversations, messages } from "@/db/schema";
 import { getDatabase } from "@/db/client";
 import { getUserSession } from "@/lib/session";
 import {recentMessageOrder} from "@/lib/message-order";
+import {readBoundedChatJson} from "@/lib/chat-safety.mjs";
+import {isSameOriginWrite} from "@/lib/request-security.mjs";
 export const runtime="nodejs";
 type Ctx={params:Promise<{id:string}>};
 const isUuid=(s:string)=>/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(s);
@@ -26,9 +28,11 @@ export async function GET(_req:Request,ctx:Ctx){
 export async function PATCH(req:Request,ctx:Ctx){
  const {session,id}=await owner(ctx);
  if(!session)return Response.json({error:"Unauthorized"},{status:401});
- if(req.headers.get("origin")&&req.headers.get("origin")!==new URL(req.url).origin)return Response.json({error:"Invalid origin"},{status:403});
- const body=await req.json().catch(()=>null);
- if(typeof body?.title!=="string"||!body.title.trim()||body.title.length>160)return Response.json({error:"Invalid title"},{status:400});
+ if(!isSameOriginWrite(req))return Response.json({error:"Invalid origin"},{status:403,headers:{"Cache-Control":"no-store"}});
+ const parsed=await readBoundedChatJson(req,2048);
+ if(!parsed.ok)return Response.json({error:parsed.error},{status:parsed.status,headers:{"Cache-Control":"no-store"}});
+ const body=parsed.value;
+ if(!body||typeof body!=="object"||Array.isArray(body)||!("title" in body)||typeof body.title!=="string"||!body.title.trim()||body.title.length>160)return Response.json({error:"Invalid title"},{status:400,headers:{"Cache-Control":"no-store"}});
  try{
  const [row]=await getDatabase().update(conversations).set({title:body.title.trim(),updatedAt:new Date()}).where(and(eq(conversations.id,id),eq(conversations.userId,session.user.id))).returning({id:conversations.id,title:conversations.title,updatedAt:conversations.updatedAt});
  if(!row)return Response.json({error:"Conversation not found"},{status:404});
@@ -38,7 +42,7 @@ export async function PATCH(req:Request,ctx:Ctx){
 export async function DELETE(req:Request,ctx:Ctx){
  const {session,id}=await owner(ctx);
  if(!session)return Response.json({error:"Unauthorized"},{status:401});
- if(req.headers.get("origin")&&req.headers.get("origin")!==new URL(req.url).origin)return Response.json({error:"Invalid origin"},{status:403});
+ if(!isSameOriginWrite(req))return Response.json({error:"Invalid origin"},{status:403,headers:{"Cache-Control":"no-store"}});
  try{
   const [row]=await getDatabase().delete(conversations).where(and(eq(conversations.id,id),eq(conversations.userId,session.user.id))).returning({id:conversations.id});
   if(!row)return Response.json({error:"Conversation not found"},{status:404});
