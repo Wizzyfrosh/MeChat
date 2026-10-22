@@ -3,6 +3,7 @@ import {conversations,messages} from "@/db/schema";
 import {getDatabase} from "@/db/client";
 import {getUserSession} from "@/lib/session";
 import {encodeHistoryCursor,escapeSqlLike,parseHistoryQuery} from "@/lib/history-query.mjs";
+import {isSameOriginWrite} from "@/lib/request-security.mjs";
 
 export const runtime="nodejs";
 export const dynamic="force-dynamic";
@@ -46,7 +47,7 @@ export async function GET(req:Request){
 export async function POST(req:Request){
  const session=await getUserSession();
  if(!session)return Response.json({error:"Unauthorized"},{status:401});
- if(req.headers.get("origin")&&req.headers.get("origin")!==new URL(req.url).origin)return Response.json({error:"Invalid origin"},{status:403});
+ if(!isSameOriginWrite(req))return Response.json({error:"Invalid origin"},{status:403,headers:{"Cache-Control":"no-store"}});
  try{
   const row=await getDatabase().insert(conversations).values({userId:session.user.id}).returning({id:conversations.id,title:conversations.title,updatedAt:conversations.updatedAt});
   return Response.json({conversation:row[0]},{status:201,headers:{"Cache-Control":"no-store"}});
