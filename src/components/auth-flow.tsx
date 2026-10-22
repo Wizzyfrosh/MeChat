@@ -286,7 +286,7 @@ export function AuthFlow({mode="login",enabled}:{mode?:Screen;enabled:boolean}){
    <div className="editorial-bottom">
     <div className="editorial-kicker"><span className="editorial-line"/> THE SPACE BETWEEN QUESTIONS AND IDEAS</div>
     <h2>Every great idea <em>starts somewhere.</em></h2>
-    <p>A focused, beautifully simple home for questions, creativity, and everything you're building next.</p>
+    <p>A focused, beautifully simple home for questions, creativity, and everything you’re building next.</p>
     <div className="editorial-foot"><span>CONVERSATIONS, WITHOUT THE NOISE</span><span>MECHAT © 2026</span></div>
    </div>
   </aside>
